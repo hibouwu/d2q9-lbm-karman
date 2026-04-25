@@ -165,7 +165,7 @@ void compute_outflow_zou_he_const_density(lbm_mesh_cell_t cell) {
 }
 
 void special_cells(Mesh* mesh, lbm_mesh_type_t* mesh_type, const lbm_comm_t* mesh_comm) {
-  // Loop on all inner cells
+#pragma omp parallel for schedule(static)
   for (size_t i = 1; i < mesh->width - 1; i++) {
     for (size_t j = 1; j < mesh->height - 1; j++) {
       switch (*(lbm_cell_type_t_get_cell(mesh_type, i, j))) {
@@ -189,26 +189,24 @@ void collision(Mesh* mesh_out, const Mesh* mesh_in) {
   assert(mesh_in->width == mesh_out->width);
   assert(mesh_in->height == mesh_out->height);
 
-  // Loop on all inner cells
-  for (size_t j = 1; j < mesh_in->height - 1; j++) {
-    for (size_t i = 1; i < mesh_in->width - 1; i++) {
+#pragma omp parallel for schedule(static)
+  for (size_t i = 1; i < mesh_in->width - 1; i++) {
+    for (size_t j = 1; j < mesh_in->height - 1; j++) {
       compute_cell_collision(Mesh_get_cell(mesh_out, i, j), Mesh_get_cell(mesh_in, i, j));
     }
   }
 }
 
 void propagation(Mesh* mesh_out, const Mesh* mesh_in) {
-  // Loop on all cells
-  for (size_t j = 0; j < mesh_out->height; j++) {
-    for (size_t i = 0; i < mesh_out->width; i++) {
-      // For all direction
+  // Pull mode: each output cell is written exactly once → no write races.
+#pragma omp parallel for schedule(static)
+  for (size_t i = 0; i < mesh_out->width; i++) {
+    for (size_t j = 0; j < mesh_out->height; j++) {
       for (size_t k = 0; k < DIRECTIONS; k++) {
-        // Compute destination point
-        ssize_t ii = (i + direction_matrix[k][0]);
-        ssize_t jj = (j + direction_matrix[k][1]);
-        // Propagate to neighboor nodes
-        if ((ii >= 0 && ii < mesh_out->width) && (jj >= 0 && jj < mesh_out->height)) {
-          Mesh_get_cell(mesh_out, ii, jj)[k] = Mesh_get_cell(mesh_in, i, j)[k];
+        ssize_t si = (ssize_t)i - (ssize_t)direction_matrix[k][0];
+        ssize_t sj = (ssize_t)j - (ssize_t)direction_matrix[k][1];
+        if (si >= 0 && si < (ssize_t)mesh_in->width && sj >= 0 && sj < (ssize_t)mesh_in->height) {
+          Mesh_get_cell(mesh_out, i, j)[k] = Mesh_get_cell(mesh_in, si, sj)[k];
         }
       }
     }

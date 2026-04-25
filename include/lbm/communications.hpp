@@ -47,8 +47,6 @@ typedef struct lbm_comm_t_s {
   MPI_Request requests[32];
   lbm_mesh_cell_t buffer;
 } lbm_comm_t;
-typedef int MPI_Syncfunc_t(MPI_Comm);
-
 static inline int lbm_comm_width(const lbm_comm_t* mc) {
   return mc->width;
 }

@@ -23,3 +23,6 @@ compile_commands.json
 *.gif
 *.png
 !ref_*
+工作记录/优化清单.md
+工作规划.md
+config_bench.txt
