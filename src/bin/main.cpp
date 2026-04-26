@@ -83,9 +83,6 @@ int main(int argc, char* argv[]) {
   Mesh temp;
   Mesh_init(&temp, lbm_comm_width(&mesh_comm), lbm_comm_height(&mesh_comm));
 
-  Mesh temp_render;
-  Mesh_init(&temp_render, lbm_comm_width(&mesh_comm), lbm_comm_height(&mesh_comm));
-
   lbm_mesh_type_t mesh_type;
   lbm_mesh_type_t_init(&mesh_type, lbm_comm_width(&mesh_comm), lbm_comm_height(&mesh_comm));
 
@@ -103,7 +100,7 @@ int main(int argc, char* argv[]) {
 
   // Write initial condition in output file
   if (lbm_gbl_config.output_filename != NULL) {
-    save_frame_all_domain(fp, &mesh, &temp_render);
+    save_frame_all_domain(fp, &mesh);
   }
 
   // Barrier to wait for all processes before starting
@@ -112,31 +109,56 @@ int main(int argc, char* argv[]) {
     putc('\n', stdout);
   }
 
+  LBM_PROF_INIT();
+
   // Time steps
   const double start_time = MPI_Wtime();
   for (ssize_t i = 1; i <= ITERATIONS; i++) {
     if (rank == RANK_MASTER) {
       fprintf(stderr, "\rStep: %6d/%6d", i, ITERATIONS);
     }
+
+    LBM_PROF_BEGIN(PROF_LOOP_TOTAL);
+
     // Compute special actions (border, obstacle...)
+    LBM_PROF_BEGIN(PROF_SPECIAL_CELLS);
     special_cells(&mesh, &mesh_type, &mesh_comm);
+    LBM_PROF_END(PROF_SPECIAL_CELLS);
 
     // Compute collision term
+    LBM_PROF_BEGIN(PROF_COLLISION);
     collision(&temp, &mesh);
+    LBM_PROF_END(PROF_COLLISION);
 
     // Overlap: post async halo, compute interior rows, wait, compute border rows
     const bool has_vn = (mesh_comm.nb_y > 1);
+
+    LBM_PROF_BEGIN(PROF_HALO_START);
     lbm_comm_halo_exchange_start(&mesh_comm, &temp);
+    LBM_PROF_END(PROF_HALO_START);
+
+    LBM_PROF_BEGIN(PROF_PROPAGATION_INTERIOR);
     propagation_interior(&mesh, &temp, has_vn);
+    LBM_PROF_END(PROF_PROPAGATION_INTERIOR);
+
+    LBM_PROF_BEGIN(PROF_HALO_FINISH);
     lbm_comm_halo_exchange_finish(&mesh_comm, &temp);
+    LBM_PROF_END(PROF_HALO_FINISH);
+
     if (has_vn) {
+      LBM_PROF_BEGIN(PROF_PROPAGATION_BORDER);
       propagation_border(&mesh, &temp);
+      LBM_PROF_END(PROF_PROPAGATION_BORDER);
     }
 
     // Save step
     if (i % WRITE_STEP_INTERVAL == 0 && lbm_gbl_config.output_filename != NULL) {
-      save_frame_all_domain(fp, &mesh, &temp_render);
+      LBM_PROF_BEGIN(PROF_SAVE_FRAME);
+      save_frame_all_domain(fp, &mesh);
+      LBM_PROF_END(PROF_SAVE_FRAME);
     }
+
+    LBM_PROF_END(PROF_LOOP_TOTAL);
   }
   const double end_time      = MPI_Wtime();
   const double elapsed_time  = end_time - start_time;
@@ -152,11 +174,12 @@ int main(int argc, char* argv[]) {
     fprintf(stderr, "FOM:  %.2f MLUPS\n", mlups);
   }
 
+  LBM_PROF_REPORT();
+
   // Free memory
   lbm_comm_release(&mesh_comm);
   Mesh_release(&mesh);
   Mesh_release(&temp);
-  Mesh_release(&temp_render);
   lbm_mesh_type_t_release(&mesh_type);
 
   // Close MPI

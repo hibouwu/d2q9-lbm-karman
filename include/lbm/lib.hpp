@@ -6,3 +6,4 @@
 #include <lbm/tpl.hpp>
 #include <lbm/communications.hpp>
 #include <lbm/physics.hpp>
+#include <lbm/profiling.hpp>

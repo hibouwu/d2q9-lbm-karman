@@ -12,6 +12,8 @@ find_package(MPI 3.0 REQUIRED)
 find_package(OpenMP 4.0 REQUIRED)
 include(cmake/third-party.cmake)
 
+option(LBM_ENABLE_PROFILING "Enable phase-level MPI_Wtime profiling (default OFF)" OFF)
+
 add_library(top.lbm-lib SHARED)
 add_executable(top.lbm-exe)
 add_executable(top.display)

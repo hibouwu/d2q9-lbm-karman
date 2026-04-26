@@ -46,7 +46,10 @@ typedef struct lbm_comm_t_s {
   /// Active count for async vertical requests (set by halo_exchange_start).
   int n_requests;
   MPI_Request requests[32];
+  /// Preallocated vertical halo pack/unpack buffer (4 * inner_w * DIRECTIONS doubles).
   lbm_mesh_cell_t buffer;
+  /// Preallocated horizontal halo pack/unpack buffer (inner_h * DIRECTIONS doubles).
+  double* horiz_buf;
 } lbm_comm_t;
 static inline int lbm_comm_width(const lbm_comm_t* mc) {
   return mc->width;
@@ -86,6 +89,4 @@ void lbm_comm_halo_exchange_start(lbm_comm_t* mesh, Mesh* mesh_to_process);
 void lbm_comm_halo_exchange_finish(lbm_comm_t* mesh, Mesh* mesh_to_process);
 
 /// @brief Mesh rendering by doing reduction on rank 0 (master).
-/// @param mesh_comm Communication mesh to use.
-/// @param temp Temporary mesh to store the segments.
-void save_frame_all_domain(FILE* fp, Mesh* source_mesh, Mesh* temp);
+void save_frame_all_domain(FILE* fp, Mesh* source_mesh);
