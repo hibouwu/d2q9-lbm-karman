@@ -124,9 +124,14 @@ int main(int argc, char* argv[]) {
     // Compute collision term
     collision(&temp, &mesh);
 
-    // Propagate values from node to neighboors
-    lbm_comm_halo_exchange(&mesh_comm, &temp);
-    propagation(&mesh, &temp);
+    // Overlap: post async halo, compute interior rows, wait, compute border rows
+    const bool has_vn = (mesh_comm.nb_y > 1);
+    lbm_comm_halo_exchange_start(&mesh_comm, &temp);
+    propagation_interior(&mesh, &temp, has_vn);
+    lbm_comm_halo_exchange_finish(&mesh_comm, &temp);
+    if (has_vn) {
+      propagation_border(&mesh, &temp);
+    }
 
     // Save step
     if (i % WRITE_STEP_INTERVAL == 0 && lbm_gbl_config.output_filename != NULL) {

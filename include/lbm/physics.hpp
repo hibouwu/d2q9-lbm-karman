@@ -96,3 +96,11 @@ void collision(Mesh* mesh_out, const Mesh* mesh_in);
 /// @param mesh_out Output mesh.
 /// @param mesh_in Input mesh (cannot be the same).
 void propagation(Mesh* mesh_out, const Mesh* mesh_in);
+
+/// @brief Interior propagation: all rows except j=1 and j=height-2 when has_vert_neighbors.
+/// Safe to call while vertical ghost rows of mesh_in are still in transit.
+void propagation_interior(Mesh* mesh_out, const Mesh* mesh_in, bool has_vert_neighbors);
+
+/// @brief Border propagation: only rows j=1 and j=height-2 (need ghost data).
+/// Must be called after lbm_comm_halo_exchange_finish.
+void propagation_border(Mesh* mesh_out, const Mesh* mesh_in);

@@ -90,16 +90,24 @@ double compute_equilibrium_profile(Vector velocity, double density, int directio
 }
 
 void compute_cell_collision(lbm_mesh_cell_t cell_out, const lbm_mesh_cell_t cell_in) {
-  // Compute macroscopic values
-  const double density = get_cell_density(cell_in);
-  Vector v;
-  get_cell_velocity(v, cell_in, density);
-
-  // Loop on microscopic directions
+  // Pass 1: fused density + velocity (4 separate loops → 1)
+  double density = 0.0, vx = 0.0, vy = 0.0;
+#pragma omp simd reduction(+:density,vx,vy)
   for (size_t k = 0; k < DIRECTIONS; k++) {
-    // Compute f at equilibrium
-    double f_eq = compute_equilibrium_profile(v, density, k);
-    // Compute f_out
+    const double fk = cell_in[k];
+    density += fk;
+    vx      += fk * direction_matrix[k][0];
+    vy      += fk * direction_matrix[k][1];
+  }
+  vx /= density;
+  vy /= density;
+  const double v2 = vx * vx + vy * vy;
+
+  // Pass 2: equilibrium + BGK update (stride-1 reads/writes → SIMD-friendly)
+#pragma omp simd
+  for (size_t k = 0; k < DIRECTIONS; k++) {
+    const double p    = direction_matrix[k][0] * vx + direction_matrix[k][1] * vy;
+    const double f_eq = equil_weight[k] * density * (1.0 + 3.0 * p + 4.5 * p * p - 1.5 * v2);
     cell_out[k] = cell_in[k] - RELAX_PARAMETER * (cell_in[k] - f_eq);
   }
 }
@@ -197,18 +205,46 @@ void collision(Mesh* mesh_out, const Mesh* mesh_in) {
   }
 }
 
+static inline void propagate_cell(Mesh* mesh_out, const Mesh* mesh_in, size_t i, size_t j) {
+  for (size_t k = 0; k < DIRECTIONS; k++) {
+    ssize_t si = (ssize_t)i - (ssize_t)direction_matrix[k][0];
+    ssize_t sj = (ssize_t)j - (ssize_t)direction_matrix[k][1];
+    if (si >= 0 && si < (ssize_t)mesh_in->width && sj >= 0 && sj < (ssize_t)mesh_in->height) {
+      Mesh_get_cell(mesh_out, i, j)[k] = Mesh_get_cell(mesh_in, si, sj)[k];
+    }
+  }
+}
+
 void propagation(Mesh* mesh_out, const Mesh* mesh_in) {
-  // Pull mode: each output cell is written exactly once → no write races.
+#pragma omp parallel for schedule(static)
+  for (size_t i = 0; i < mesh_out->width; i++)
+    for (size_t j = 0; j < mesh_out->height; j++)
+      propagate_cell(mesh_out, mesh_in, i, j);
+}
+
+void propagation_interior(Mesh* mesh_out, const Mesh* mesh_in, bool has_vert_neighbors) {
+  if (!has_vert_neighbors) {
+#pragma omp parallel for schedule(static)
+    for (size_t i = 0; i < mesh_out->width; i++)
+      for (size_t j = 0; j < mesh_out->height; j++)
+        propagate_cell(mesh_out, mesh_in, i, j);
+  } else {
+    // Skip j=1 and j=height-2: those rows read from ghost rows not yet received
+#pragma omp parallel for schedule(static)
+    for (size_t i = 0; i < mesh_out->width; i++) {
+      propagate_cell(mesh_out, mesh_in, i, 0);
+      for (size_t j = 2; j < mesh_out->height - 2; j++)
+        propagate_cell(mesh_out, mesh_in, i, j);
+      propagate_cell(mesh_out, mesh_in, i, mesh_out->height - 1);
+    }
+  }
+}
+
+void propagation_border(Mesh* mesh_out, const Mesh* mesh_in) {
+  // Only rows j=1 and j=height-2, which read from ghost rows (need finished halo)
 #pragma omp parallel for schedule(static)
   for (size_t i = 0; i < mesh_out->width; i++) {
-    for (size_t j = 0; j < mesh_out->height; j++) {
-      for (size_t k = 0; k < DIRECTIONS; k++) {
-        ssize_t si = (ssize_t)i - (ssize_t)direction_matrix[k][0];
-        ssize_t sj = (ssize_t)j - (ssize_t)direction_matrix[k][1];
-        if (si >= 0 && si < (ssize_t)mesh_in->width && sj >= 0 && sj < (ssize_t)mesh_in->height) {
-          Mesh_get_cell(mesh_out, i, j)[k] = Mesh_get_cell(mesh_in, si, sj)[k];
-        }
-      }
-    }
+    propagate_cell(mesh_out, mesh_in, i, 1);
+    propagate_cell(mesh_out, mesh_in, i, mesh_out->height - 2);
   }
 }

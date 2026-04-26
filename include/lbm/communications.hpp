@@ -43,7 +43,8 @@ typedef struct lbm_comm_t_s {
   /// ID of the bottom neighboor, -1 if none.
   int bottom_id;
   int corner_id[4];
-  /// Async requests.
+  /// Active count for async vertical requests (set by halo_exchange_start).
+  int n_requests;
   MPI_Request requests[32];
   lbm_mesh_cell_t buffer;
 } lbm_comm_t;
@@ -74,8 +75,15 @@ void lbm_comm_release(lbm_comm_t* mesh);
 /// @param mesh_comm Configuration to print.
 void lbm_comm_print(const lbm_comm_t* mesh_comm);
 
-/// @brief Performance halo exchange of ghost cells.
+/// @brief Performance halo exchange of ghost cells (blocking convenience wrapper).
 void lbm_comm_halo_exchange(lbm_comm_t* mesh, Mesh* mesh_to_process);
+
+/// @brief Phase 1: post async vertical Isend/Irecv; horizontal/diagonal done blocking.
+/// Call propagation_interior() between start and finish for comm/compute overlap.
+void lbm_comm_halo_exchange_start(lbm_comm_t* mesh, Mesh* mesh_to_process);
+
+/// @brief Phase 2: MPI_Waitall + unpack vertical ghost rows + diagonal exchange.
+void lbm_comm_halo_exchange_finish(lbm_comm_t* mesh, Mesh* mesh_to_process);
 
 /// @brief Mesh rendering by doing reduction on rank 0 (master).
 /// @param mesh_comm Communication mesh to use.

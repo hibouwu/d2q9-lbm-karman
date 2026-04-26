@@ -147,9 +147,10 @@ void lbm_comm_init(lbm_comm_t* mesh_comm, int rank, int comm_size, uint32_t widt
   mesh_comm->corner_id[CORNER_BOTTOM_LEFT]  = helper_get_rank_id(nb_x, nb_y, rank_x - 1, rank_y + 1);
   mesh_comm->corner_id[CORNER_BOTTOM_RIGHT] = helper_get_rank_id(nb_x, nb_y, rank_x + 1, rank_y + 1);
 
-  // If more than 1 on y, need transmission buffer
+  // 4 sub-buffers for async vertical comms: sbuf_bot, rbuf_top, sbuf_top, rbuf_bot
+  mesh_comm->n_requests = 0;
   if (nb_y > 1) {
-    mesh_comm->buffer = static_cast<double*>(malloc(sizeof(double) * DIRECTIONS * width / nb_x));
+    mesh_comm->buffer = static_cast<double*>(malloc(4 * sizeof(double) * DIRECTIONS * width / nb_x));
   } else {
     mesh_comm->buffer = NULL;
   }
@@ -267,81 +268,135 @@ static void lbm_comm_sync_ghosts_vertical(
   }
 }
 
-void lbm_comm_halo_exchange(lbm_comm_t* mesh, Mesh* mesh_to_process) {
-  // Left to right phase
+/// Phase 1: horizontal (blocking, usually no-ops) + async vertical Isend/Irecv.
+/// Sub-buffer layout (each of size count = (width-3)*DIRECTIONS doubles):
+///   [0] sbuf_bot: pack row height-2, Isend to bottom_id
+///   [1] rbuf_top: Irecv row 0     from top_id
+///   [2] sbuf_top: pack row 1,      Isend to top_id
+///   [3] rbuf_bot: Irecv row height-1 from bottom_id
+void lbm_comm_halo_exchange_start(lbm_comm_t* mesh, Mesh* mesh_to_process) {
+  // Horizontal phases (blocking, target=-1 for standard power-of-2 configs)
   lbm_comm_sync_ghosts_horizontal(mesh, mesh_to_process, COMM_SEND, mesh->right_id, mesh->width - 2);
   lbm_comm_sync_ghosts_horizontal(mesh, mesh_to_process, COMM_RECV, mesh->left_id, 0);
-
-  // Right to left phase
   lbm_comm_sync_ghosts_horizontal(mesh, mesh_to_process, COMM_SEND, mesh->left_id, 1);
   lbm_comm_sync_ghosts_horizontal(mesh, mesh_to_process, COMM_RECV, mesh->right_id, mesh->width - 1);
 
-  // Top to bottom phase
-  lbm_comm_sync_ghosts_vertical(mesh, mesh_to_process, COMM_SEND, mesh->bottom_id, mesh->height - 2);
-  lbm_comm_sync_ghosts_vertical(mesh, mesh_to_process, COMM_RECV, mesh->top_id, 0);
+  // Async vertical
+  mesh->n_requests = 0;
+  if (mesh->nb_y <= 1) {
+    return;
+  }
 
-  // Bottom to top phase
-  lbm_comm_sync_ghosts_vertical(mesh, mesh_to_process, COMM_SEND, mesh->top_id, 1);
-  lbm_comm_sync_ghosts_vertical(mesh, mesh_to_process, COMM_RECV, mesh->bottom_id, mesh->height - 1);
+  const size_t ncells = mesh_to_process->width - 3;
+  const size_t count  = ncells * DIRECTIONS;
+  double* sbuf_bot    = mesh->buffer + 0 * count;
+  double* rbuf_top    = mesh->buffer + 1 * count;
+  double* sbuf_top    = mesh->buffer + 2 * count;
+  double* rbuf_bot    = mesh->buffer + 3 * count;
 
-  // Top left phase
+  if (mesh->bottom_id != -1) {
+    for (size_t x = 1; x < mesh_to_process->width - 2; x++)
+      memcpy(sbuf_bot + (x - 1) * DIRECTIONS, Mesh_get_cell(mesh_to_process, x, mesh->height - 2), DIRECTIONS * sizeof(double));
+    MPI_Isend(sbuf_bot, count, MPI_DOUBLE, mesh->bottom_id, 0, MPI_COMM_WORLD, &mesh->requests[mesh->n_requests++]);
+  }
+  if (mesh->top_id != -1) {
+    MPI_Irecv(rbuf_top, count, MPI_DOUBLE, mesh->top_id, 0, MPI_COMM_WORLD, &mesh->requests[mesh->n_requests++]);
+  }
+  if (mesh->top_id != -1) {
+    for (size_t x = 1; x < mesh_to_process->width - 2; x++)
+      memcpy(sbuf_top + (x - 1) * DIRECTIONS, Mesh_get_cell(mesh_to_process, x, 1), DIRECTIONS * sizeof(double));
+    MPI_Isend(sbuf_top, count, MPI_DOUBLE, mesh->top_id, 0, MPI_COMM_WORLD, &mesh->requests[mesh->n_requests++]);
+  }
+  if (mesh->bottom_id != -1) {
+    MPI_Irecv(rbuf_bot, count, MPI_DOUBLE, mesh->bottom_id, 0, MPI_COMM_WORLD, &mesh->requests[mesh->n_requests++]);
+  }
+}
+
+/// Phase 2: Waitall vertical + unpack ghost rows + diagonal exchanges.
+void lbm_comm_halo_exchange_finish(lbm_comm_t* mesh, Mesh* mesh_to_process) {
+  if (mesh->n_requests > 0) {
+    MPI_Waitall(mesh->n_requests, mesh->requests, MPI_STATUSES_IGNORE);
+    mesh->n_requests = 0;
+
+    const size_t ncells = mesh_to_process->width - 3;
+    const size_t count  = ncells * DIRECTIONS;
+    double* rbuf_top    = mesh->buffer + 1 * count;
+    double* rbuf_bot    = mesh->buffer + 3 * count;
+
+    if (mesh->top_id != -1) {
+      for (size_t x = 1; x < mesh_to_process->width - 2; x++)
+        memcpy(Mesh_get_cell(mesh_to_process, x, 0), rbuf_top + (x - 1) * DIRECTIONS, DIRECTIONS * sizeof(double));
+    }
+    if (mesh->bottom_id != -1) {
+      for (size_t x = 1; x < mesh_to_process->width - 2; x++)
+        memcpy(Mesh_get_cell(mesh_to_process, x, mesh->height - 1), rbuf_bot + (x - 1) * DIRECTIONS, DIRECTIONS * sizeof(double));
+    }
+  }
+
+  // Diagonal exchanges (blocking, target=-1 for standard configs)
   lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_SEND, mesh->corner_id[CORNER_TOP_LEFT], 1, 1);
-  lbm_comm_sync_ghosts_diagonal(
-    mesh_to_process, COMM_RECV, mesh->corner_id[CORNER_BOTTOM_RIGHT], mesh->width - 1, mesh->height - 1
-  );
-
-  // Bottom left phase
+  lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_RECV, mesh->corner_id[CORNER_BOTTOM_RIGHT], mesh->width - 1, mesh->height - 1);
   lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_SEND, mesh->corner_id[CORNER_BOTTOM_LEFT], 1, mesh->height - 2);
   lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_RECV, mesh->corner_id[CORNER_TOP_RIGHT], mesh->width - 1, 0);
-
-  // Top right phase
   lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_SEND, mesh->corner_id[CORNER_TOP_RIGHT], mesh->width - 2, 1);
   lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_RECV, mesh->corner_id[CORNER_BOTTOM_LEFT], 0, mesh->height - 1);
-
-  // Bottom right phase
-  lbm_comm_sync_ghosts_diagonal(
-    mesh_to_process, COMM_SEND, mesh->corner_id[CORNER_BOTTOM_RIGHT], mesh->width - 2, mesh->height - 2
-  );
+  lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_SEND, mesh->corner_id[CORNER_BOTTOM_RIGHT], mesh->width - 2, mesh->height - 2);
   lbm_comm_sync_ghosts_diagonal(mesh_to_process, COMM_RECV, mesh->corner_id[CORNER_TOP_LEFT], 0, 0);
 }
 
-void save_frame_all_domain(FILE* fp, Mesh* source_mesh, Mesh* temp) {
+void lbm_comm_halo_exchange(lbm_comm_t* mesh, Mesh* mesh_to_process) {
+  lbm_comm_halo_exchange_start(mesh, mesh_to_process);
+  lbm_comm_halo_exchange_finish(mesh, mesh_to_process);
+}
+
+// Builds a lbm_file_entry_t buffer from a mesh's interior cells.
+// Each cell contributes one (v, rho) entry — avoids recomputing on receiver side.
+static lbm_file_entry_t* build_frame_buf(const Mesh* mesh, int* out_ncells) {
+  const int iw      = (int)mesh->width - 2;
+  const int ih      = (int)mesh->height - 2;
+  const int ncells  = iw * ih;
+  lbm_file_entry_t* buf = (lbm_file_entry_t*)malloc((size_t)ncells * sizeof(lbm_file_entry_t));
+  int idx = 0;
+  for (int i = 1; i <= iw; i++) {
+    for (int j = 1; j <= ih; j++) {
+      lbm_mesh_cell_t c     = Mesh_get_cell(mesh, i, j);
+      const double density  = get_cell_density(c);
+      Vector v;
+      get_cell_velocity(v, c, density);
+      buf[idx].rho = (float)density;
+      buf[idx].v   = (float)std::sqrt(get_vect_norm_2(v, v));
+      idx++;
+    }
+  }
+  *out_ncells = ncells;
+  return buf;
+}
+
+void save_frame_all_domain(FILE* fp, Mesh* source_mesh, Mesh* /*temp*/) {
   int comm_size, rank;
   MPI_Comm_size(MPI_COMM_WORLD, &comm_size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  // If we have more than one process
-  if (1 < comm_size) {
-    if (rank == RANK_MASTER) {
-      // Rank 0 renders its local Mesh
-      save_frame(fp, source_mesh);
-      // Rank 0 receives & render other processes meshes
-      for (ssize_t i = 1; i < comm_size; i++) {
-        MPI_Status status;
-        MPI_Recv(
-          temp->cells,
-          source_mesh->width * source_mesh->height * DIRECTIONS,
-          MPI_DOUBLE,
-          i,
-          0,
-          MPI_COMM_WORLD,
-          &status
-        );
-        save_frame(fp, temp);
-      }
-    } else {
-      // All other ranks send their local mesh
-      MPI_Send(
-        source_mesh->cells,
-        source_mesh->width * source_mesh->height * DIRECTIONS,
-        MPI_DOUBLE,
-        RANK_MASTER,
-        0,
-        MPI_COMM_WORLD
-      );
-    }
-  } else {
-    // Only 0 renders its local mesh
+  if (comm_size == 1) {
     save_frame(fp, source_mesh);
+    return;
+  }
+
+  // Each rank pre-computes its (rho, v) floats locally: 2 floats/cell vs 9 doubles/cell (9x reduction).
+  int ncells;
+  lbm_file_entry_t* local_buf = build_frame_buf(source_mesh, &ncells);
+
+  if (rank == RANK_MASTER) {
+    fwrite(local_buf, sizeof(lbm_file_entry_t), ncells, fp);
+    free(local_buf);
+    lbm_file_entry_t* recv_buf = (lbm_file_entry_t*)malloc((size_t)ncells * sizeof(lbm_file_entry_t));
+    for (int i = 1; i < comm_size; i++) {
+      MPI_Recv(recv_buf, ncells * 2, MPI_FLOAT, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      fwrite(recv_buf, sizeof(lbm_file_entry_t), ncells, fp);
+    }
+    free(recv_buf);
+  } else {
+    MPI_Send(local_buf, ncells * 2, MPI_FLOAT, RANK_MASTER, 0, MPI_COMM_WORLD);
+    free(local_buf);
   }
 }
