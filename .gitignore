@@ -26,3 +26,11 @@ compile_commands.json
 工作记录/优化清单.md
 工作规划.md
 config_bench.txt
+
+.aux
+.fdb_latexmk
+.fls
+.log
+.out
+.snm
+.toc
