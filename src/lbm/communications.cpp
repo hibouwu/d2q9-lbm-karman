@@ -223,8 +223,11 @@ static void lbm_comm_sync_ghosts_diagonal(
 //   buffer + 2*count  sbuf_top — packed send toward top neighbour
 //   buffer + 3*count  rbuf_bot — receive from bottom neighbour
 //
-// Pack format (SoA → cell-interleaved):
-//   [(f0,f1,..,f8) for x=1], [(f0,f1,..,f8) for x=2], ..., [(f0,f1,..,f8) for x=W-2]
+// Pack format (k-major, 优化24):
+//   [f0(x=1..W-2)], [f1(x=1..W-2)], ..., [f8(x=1..W-2)]
+// Each direction k occupies inner_w = W-3 contiguous slots.
+// This keeps each k's pack/unpack within one SoA plane, improving prefetcher
+// utilisation vs the old cell-interleaved layout that jumped W*H doubles per k.
 // ---------------------------------------------------------------------------
 void lbm_comm_halo_exchange_start(lbm_comm_t* mesh, Mesh* mesh_to_process) {
   LBM_PROF_BEGIN(PROF_HALO_HORIZ);
@@ -246,18 +249,23 @@ void lbm_comm_halo_exchange_start(lbm_comm_t* mesh, Mesh* mesh_to_process) {
 
   // Pack both send rows before posting any request
   LBM_PROF_BEGIN(PROF_HALO_VERT_PACK);
+  // k-major pack: outer k, inner x — each k accesses one contiguous SoA plane.
+  // Access within a plane is stride-H (x direction), but all reads stay inside
+  // the same plane, which is friendlier to the hardware prefetcher than the old
+  // cell-interleaved layout that jumped W*H doubles between consecutive k reads.
   if (mesh->bottom_id != -1) {
-    for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
-      for (int k = 0; k < DIRECTIONS; k++) {
-        sbuf_bot[(x - 1) * DIRECTIONS + k] =
-          Mesh_get_f(mesh_to_process, k, (int)x, (int)(mesh->height - 2));
+    const int jbot = (int)(mesh->height - 2);
+    for (int k = 0; k < DIRECTIONS; k++) {
+      for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
+        sbuf_bot[k * ncells + (x - 1)] =
+          Mesh_get_f(mesh_to_process, k, (int)x, jbot);
       }
     }
   }
   if (mesh->top_id != -1) {
-    for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
-      for (int k = 0; k < DIRECTIONS; k++) {
-        sbuf_top[(x - 1) * DIRECTIONS + k] =
+    for (int k = 0; k < DIRECTIONS; k++) {
+      for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
+        sbuf_top[k * ncells + (x - 1)] =
           Mesh_get_f(mesh_to_process, k, (int)x, 1);
       }
     }
@@ -298,19 +306,22 @@ void lbm_comm_halo_exchange_finish(lbm_comm_t* mesh, Mesh* mesh_to_process) {
     double* rbuf_bot    = mesh->buffer + 3 * count;
 
     LBM_PROF_BEGIN(PROF_HALO_VERT_UNPACK);
+    // k-major unpack: mirror of pack — outer k, inner x.
+    const size_t ncells_u = mesh_to_process->width - 3;
     if (mesh->top_id != -1) {
-      for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
-        for (int k = 0; k < DIRECTIONS; k++) {
+      for (int k = 0; k < DIRECTIONS; k++) {
+        for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
           Mesh_set_f(mesh_to_process, k, (int)x, 0,
-                     rbuf_top[(x - 1) * DIRECTIONS + k]);
+                     rbuf_top[k * ncells_u + (x - 1)]);
         }
       }
     }
     if (mesh->bottom_id != -1) {
-      for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
-        for (int k = 0; k < DIRECTIONS; k++) {
-          Mesh_set_f(mesh_to_process, k, (int)x, (int)(mesh->height - 1),
-                     rbuf_bot[(x - 1) * DIRECTIONS + k]);
+      const int jghost = (int)(mesh->height - 1);
+      for (int k = 0; k < DIRECTIONS; k++) {
+        for (size_t x = 1; x < mesh_to_process->width - 2; x++) {
+          Mesh_set_f(mesh_to_process, k, (int)x, jghost,
+                     rbuf_bot[k * ncells_u + (x - 1)]);
         }
       }
     }

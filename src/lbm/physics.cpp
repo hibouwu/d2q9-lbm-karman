@@ -89,11 +89,13 @@ typedef enum {
   COLLISION_UNROLLED,
   COLLISION_MULTICELL,
   COLLISION_MULTICELL_VEC,
+  COLLISION_MULTICELL_VEC_PF,
 } lbm_collision_impl_t;
 
 static lbm_collision_impl_t get_collision_impl(void) {
   const char* env = getenv("LBM_COLLISION_IMPL");
   if (env == NULL || strcmp(env, "multicell_vec") == 0) return COLLISION_MULTICELL_VEC;
+  if (strcmp(env, "multicell_vec_pf") == 0) return COLLISION_MULTICELL_VEC_PF;
   if (strcmp(env, "multicell") == 0) return COLLISION_MULTICELL;
   if (strcmp(env, "baseline") == 0) return COLLISION_BASELINE;
   if (strcmp(env, "unrolled") == 0) return COLLISION_UNROLLED;
@@ -373,6 +375,119 @@ static void collision_multicell_vec(Mesh* mesh_out, const Mesh* mesh_in) {
   }
 }
 
+// ── SoA multi-cell + vectorization + manual prefetch (优化23 实验路径) ─────────
+//
+// Identical to collision_multicell_vec but inserts __builtin_prefetch for all
+// 9 input planes at distance DIST doubles ahead.  Motivation: Zen 4 L1D stream
+// prefetcher handles ~8 sequential streams; with 9 input planes one stream
+// may consistently miss hardware prefetch, causing an L2 hit at each column start.
+//
+// DIST=8: prefetch exactly 1 AVX-512 iteration (8 doubles = 1 cache line) ahead.
+// DIST=16: prefetch 2 iterations ahead (covers L2 latency of ~12 cycles).
+#ifndef LBM_PREFETCH_DIST
+#define LBM_PREFETCH_DIST 8
+#endif
+
+static void collision_multicell_vec_pf(Mesh* mesh_out, const Mesh* mesh_in) {
+  const int W = (int)mesh_in->width;
+  const int H = (int)mesh_in->height;
+
+  const double A      = 1.0 - RELAX_PARAMETER;
+  const double rp_w0  = (4.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w14 = (1.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w58 = (1.0 / 36.0) * RELAX_PARAMETER;
+
+  const double* __restrict__ p0 = Mesh_get_plane(mesh_in,  0);
+  const double* __restrict__ p1 = Mesh_get_plane(mesh_in,  1);
+  const double* __restrict__ p2 = Mesh_get_plane(mesh_in,  2);
+  const double* __restrict__ p3 = Mesh_get_plane(mesh_in,  3);
+  const double* __restrict__ p4 = Mesh_get_plane(mesh_in,  4);
+  const double* __restrict__ p5 = Mesh_get_plane(mesh_in,  5);
+  const double* __restrict__ p6 = Mesh_get_plane(mesh_in,  6);
+  const double* __restrict__ p7 = Mesh_get_plane(mesh_in,  7);
+  const double* __restrict__ p8 = Mesh_get_plane(mesh_in,  8);
+  double* __restrict__       q0 = Mesh_get_plane(mesh_out, 0);
+  double* __restrict__       q1 = Mesh_get_plane(mesh_out, 1);
+  double* __restrict__       q2 = Mesh_get_plane(mesh_out, 2);
+  double* __restrict__       q3 = Mesh_get_plane(mesh_out, 3);
+  double* __restrict__       q4 = Mesh_get_plane(mesh_out, 4);
+  double* __restrict__       q5 = Mesh_get_plane(mesh_out, 5);
+  double* __restrict__       q6 = Mesh_get_plane(mesh_out, 6);
+  double* __restrict__       q7 = Mesh_get_plane(mesh_out, 7);
+  double* __restrict__       q8 = Mesh_get_plane(mesh_out, 8);
+
+#pragma omp parallel for schedule(static)
+  for (int i = 1; i < W - 1; i++) {
+    const size_t col_off = (size_t)i * H;
+    const double* __restrict__ cp0 = p0 + col_off;
+    const double* __restrict__ cp1 = p1 + col_off;
+    const double* __restrict__ cp2 = p2 + col_off;
+    const double* __restrict__ cp3 = p3 + col_off;
+    const double* __restrict__ cp4 = p4 + col_off;
+    const double* __restrict__ cp5 = p5 + col_off;
+    const double* __restrict__ cp6 = p6 + col_off;
+    const double* __restrict__ cp7 = p7 + col_off;
+    const double* __restrict__ cp8 = p8 + col_off;
+    double* __restrict__ cq0 = q0 + col_off;
+    double* __restrict__ cq1 = q1 + col_off;
+    double* __restrict__ cq2 = q2 + col_off;
+    double* __restrict__ cq3 = q3 + col_off;
+    double* __restrict__ cq4 = q4 + col_off;
+    double* __restrict__ cq5 = q5 + col_off;
+    double* __restrict__ cq6 = q6 + col_off;
+    double* __restrict__ cq7 = q7 + col_off;
+    double* __restrict__ cq8 = q8 + col_off;
+
+#pragma GCC ivdep
+    for (int j = 1; j < H - 1; j++) {
+      __builtin_prefetch(cp0 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp1 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp2 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp3 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp4 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp5 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp6 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp7 + j + LBM_PREFETCH_DIST, 0, 3);
+      __builtin_prefetch(cp8 + j + LBM_PREFETCH_DIST, 0, 3);
+
+      const double f0 = cp0[j], f1 = cp1[j], f2 = cp2[j];
+      const double f3 = cp3[j], f4 = cp4[j], f5 = cp5[j];
+      const double f6 = cp6[j], f7 = cp7[j], f8 = cp8[j];
+
+      const double density = f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      const double inv_rho = 1.0 / density;
+      const double vx      = (f1 - f3 + f5 - f6 - f7 + f8) * inv_rho;
+      const double vy      = (f2 - f4 + f5 + f6 - f7 - f8) * inv_rho;
+      const double v2      = vx * vx + vy * vy;
+
+      const double w0  = rp_w0  * density;
+      const double w14 = rp_w14 * density;
+      const double w58 = rp_w58 * density;
+      const double base      = 1.0 - 1.5 * v2;
+      const double base_vx2  = base + 4.5 * vx * vx;
+      const double base_vy2  = base + 4.5 * vy * vy;
+      const double ppp       = vx + vy;
+      const double pmm       = vy - vx;
+      const double base_pp2  = base + 4.5 * ppp * ppp;
+      const double base_pm2  = base + 4.5 * pmm * pmm;
+      const double vx3       = 3.0 * vx;
+      const double vy3       = 3.0 * vy;
+      const double ppp3      = 3.0 * ppp;
+      const double pmm3      = 3.0 * pmm;
+
+      cq0[j] = A * f0 + w0  *  base;
+      cq1[j] = A * f1 + w14 * (base_vx2 + vx3);
+      cq2[j] = A * f2 + w14 * (base_vy2 + vy3);
+      cq3[j] = A * f3 + w14 * (base_vx2 - vx3);
+      cq4[j] = A * f4 + w14 * (base_vy2 - vy3);
+      cq5[j] = A * f5 + w58 * (base_pp2 + ppp3);
+      cq6[j] = A * f6 + w58 * (base_pm2 + pmm3);
+      cq7[j] = A * f7 + w58 * (base_pp2 - ppp3);
+      cq8[j] = A * f8 + w58 * (base_pm2 - pmm3);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Boundary conditions
 // ---------------------------------------------------------------------------
@@ -464,6 +579,8 @@ void collision(Mesh* mesh_out, const Mesh* mesh_in) {
     collision_multicell(mesh_out, mesh_in);
   } else if (impl == COLLISION_MULTICELL_VEC) {
     collision_multicell_vec(mesh_out, mesh_in);
+  } else if (impl == COLLISION_MULTICELL_VEC_PF) {
+    collision_multicell_vec_pf(mesh_out, mesh_in);
   } else if (impl == COLLISION_UNROLLED) {
 #pragma omp parallel for schedule(static)
     for (size_t i = 1; i < mesh_in->width - 1; i++) {
