@@ -125,30 +125,100 @@ int main(int argc, char* argv[]) {
     special_cells(&mesh, &mesh_type, &mesh_comm);
     LBM_PROF_END(PROF_SPECIAL_CELLS);
 
-    // Compute collision term
-    LBM_PROF_BEGIN(PROF_COLLISION);
-    collision(&temp, &mesh);
-    LBM_PROF_END(PROF_COLLISION);
-
-    // Overlap: post async halo, compute interior rows, wait, compute border rows
     const bool has_vn = (mesh_comm.nb_y > 1);
 
-    LBM_PROF_BEGIN(PROF_HALO_START);
-    lbm_comm_halo_exchange_start(&mesh_comm, &temp);
-    LBM_PROF_END(PROF_HALO_START);
+    if (!has_vn) {
+      // Single-rank vertical path: no vertical halo needed, simple serial structure.
+      LBM_PROF_BEGIN(PROF_COLLISION);
+      collision(&temp, &mesh);
+      LBM_PROF_END(PROF_COLLISION);
 
-    LBM_PROF_BEGIN(PROF_PROPAGATION_INTERIOR);
-    propagation_interior(&mesh, &temp, has_vn);
-    LBM_PROF_END(PROF_PROPAGATION_INTERIOR);
+      LBM_PROF_BEGIN(PROF_HALO_START);
+      lbm_comm_halo_exchange_start(&mesh_comm, &temp);
+      LBM_PROF_END(PROF_HALO_START);
 
-    LBM_PROF_BEGIN(PROF_HALO_FINISH);
-    lbm_comm_halo_exchange_finish(&mesh_comm, &temp);
-    LBM_PROF_END(PROF_HALO_FINISH);
+      LBM_PROF_BEGIN(PROF_PROPAGATION_INTERIOR);
+      propagation_interior(&mesh, &temp, false);
+      LBM_PROF_END(PROF_PROPAGATION_INTERIOR);
 
-    if (has_vn) {
-      LBM_PROF_BEGIN(PROF_PROPAGATION_BORDER);
-      propagation_border(&mesh, &temp);
-      LBM_PROF_END(PROF_PROPAGATION_BORDER);
+      LBM_PROF_BEGIN(PROF_HALO_FINISH);
+      lbm_comm_halo_exchange_finish(&mesh_comm, &temp);
+      LBM_PROF_END(PROF_HALO_FINISH);
+    } else {
+      // Extended overlap path: one omp parallel region spans collision through
+      // propagation_border, maximising the window where interior work overlaps
+      // with in-flight MPI transfers.
+      //
+      // Execution order inside the region:
+      //   1. border collision (j=1, j=H-2)          — all threads
+      //   2. halo_start (Isend/Irecv)                — master only
+      //   3. interior collision (j=2..H-3)           — all threads, overlapped
+      //   4. propagation_interior                    — all threads, overlapped
+      //   5. halo_finish (Waitall + unpack)          — master only
+      //   6. propagation_border (j=1, j=H-2)        — all threads
+      //
+      // All LBM_PROF_* calls inside the region are wrapped in omp master to
+      // avoid races on the shared profiling accumulators.
+
+      const int H = (int)temp.height;
+
+#pragma omp parallel
+      {
+        // ── 1. Border collision ──────────────────────────────────────────────
+#pragma omp master
+        { LBM_PROF_BEGIN(PROF_COLLISION); }
+
+        collision_rows(&temp, &mesh, 1, 2);       // j=1;   implicit barrier
+        collision_rows(&temp, &mesh, H - 2, H - 1); // j=H-2; implicit barrier
+        // All threads synchronized here; border row data ready to pack.
+
+        // ── 2. Post async vertical halo (master only) ────────────────────────
+        // Non-master threads skip omp master and proceed immediately to step 3.
+        // Master joins step 3 after posting Isend/Irecv (fast, non-blocking).
+#pragma omp master
+        {
+          LBM_PROF_BEGIN(PROF_HALO_START);
+          lbm_comm_halo_exchange_start(&mesh_comm, &temp);
+          LBM_PROF_END(PROF_HALO_START);
+        }
+        // No barrier: interior collision does not read ghost rows.
+
+        // ── 3. Interior collision (overlapped with in-flight MPI) ───────────
+        collision_rows(&temp, &mesh, 2, H - 2);   // implicit barrier
+
+#pragma omp master
+        { LBM_PROF_END(PROF_COLLISION); }
+
+        // ── 4. Propagation interior (overlapped with in-flight MPI) ─────────
+#pragma omp master
+        { LBM_PROF_BEGIN(PROF_PROPAGATION_INTERIOR); }
+
+        propagation_interior_omp_region(&mesh, &temp, true);
+        // ends with explicit #pragma omp barrier
+
+#pragma omp master
+        { LBM_PROF_END(PROF_PROPAGATION_INTERIOR); }
+
+        // ── 5. Wait for halo transfers (master only) ─────────────────────────
+#pragma omp master
+        {
+          LBM_PROF_BEGIN(PROF_HALO_FINISH);
+          lbm_comm_halo_exchange_finish(&mesh_comm, &temp);
+          LBM_PROF_END(PROF_HALO_FINISH);
+        }
+        // Barrier: propagation_border reads ghost rows filled by halo_finish.
+#pragma omp barrier
+
+        // ── 6. Border propagation (uses now-available ghost rows) ────────────
+#pragma omp master
+        { LBM_PROF_BEGIN(PROF_PROPAGATION_BORDER); }
+
+        propagation_border_omp_region(&mesh, &temp);
+        // ends with explicit #pragma omp barrier
+
+#pragma omp master
+        { LBM_PROF_END(PROF_PROPAGATION_BORDER); }
+      } // end #pragma omp parallel
     }
 
     // Save step

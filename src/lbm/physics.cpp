@@ -706,3 +706,191 @@ void propagation_border(Mesh* mesh_out, const Mesh* mesh_in) {
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Row-range collision: for use inside an existing omp parallel region.
+//
+// Implements the multicell_vec kernel for i=1..W-2, j in [j_begin, j_end).
+// Uses #pragma omp for (distributes i over threads in the enclosing region).
+// The omp for ends with an implicit barrier unless compiled with nowait.
+// ---------------------------------------------------------------------------
+
+static void collision_multicell_vec_rows_omp(
+    Mesh* mesh_out, const Mesh* mesh_in, int j_begin, int j_end)
+{
+  const int W = (int)mesh_in->width;
+  const int H = (int)mesh_in->height;
+
+  const double A      = 1.0 - RELAX_PARAMETER;
+  const double rp_w0  = (4.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w14 = (1.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w58 = (1.0 / 36.0) * RELAX_PARAMETER;
+
+  const double* __restrict__ p0 = Mesh_get_plane(mesh_in,  0);
+  const double* __restrict__ p1 = Mesh_get_plane(mesh_in,  1);
+  const double* __restrict__ p2 = Mesh_get_plane(mesh_in,  2);
+  const double* __restrict__ p3 = Mesh_get_plane(mesh_in,  3);
+  const double* __restrict__ p4 = Mesh_get_plane(mesh_in,  4);
+  const double* __restrict__ p5 = Mesh_get_plane(mesh_in,  5);
+  const double* __restrict__ p6 = Mesh_get_plane(mesh_in,  6);
+  const double* __restrict__ p7 = Mesh_get_plane(mesh_in,  7);
+  const double* __restrict__ p8 = Mesh_get_plane(mesh_in,  8);
+  double* __restrict__       q0 = Mesh_get_plane(mesh_out, 0);
+  double* __restrict__       q1 = Mesh_get_plane(mesh_out, 1);
+  double* __restrict__       q2 = Mesh_get_plane(mesh_out, 2);
+  double* __restrict__       q3 = Mesh_get_plane(mesh_out, 3);
+  double* __restrict__       q4 = Mesh_get_plane(mesh_out, 4);
+  double* __restrict__       q5 = Mesh_get_plane(mesh_out, 5);
+  double* __restrict__       q6 = Mesh_get_plane(mesh_out, 6);
+  double* __restrict__       q7 = Mesh_get_plane(mesh_out, 7);
+  double* __restrict__       q8 = Mesh_get_plane(mesh_out, 8);
+
+#pragma omp for schedule(static)
+  for (int i = 1; i < W - 1; i++) {
+    const size_t col_off = (size_t)i * H;
+    const double* __restrict__ cp0 = p0 + col_off;
+    const double* __restrict__ cp1 = p1 + col_off;
+    const double* __restrict__ cp2 = p2 + col_off;
+    const double* __restrict__ cp3 = p3 + col_off;
+    const double* __restrict__ cp4 = p4 + col_off;
+    const double* __restrict__ cp5 = p5 + col_off;
+    const double* __restrict__ cp6 = p6 + col_off;
+    const double* __restrict__ cp7 = p7 + col_off;
+    const double* __restrict__ cp8 = p8 + col_off;
+    double* __restrict__ cq0 = q0 + col_off;
+    double* __restrict__ cq1 = q1 + col_off;
+    double* __restrict__ cq2 = q2 + col_off;
+    double* __restrict__ cq3 = q3 + col_off;
+    double* __restrict__ cq4 = q4 + col_off;
+    double* __restrict__ cq5 = q5 + col_off;
+    double* __restrict__ cq6 = q6 + col_off;
+    double* __restrict__ cq7 = q7 + col_off;
+    double* __restrict__ cq8 = q8 + col_off;
+
+#pragma GCC ivdep
+    for (int j = j_begin; j < j_end; j++) {
+      const double f0 = cp0[j], f1 = cp1[j], f2 = cp2[j];
+      const double f3 = cp3[j], f4 = cp4[j], f5 = cp5[j];
+      const double f6 = cp6[j], f7 = cp7[j], f8 = cp8[j];
+
+      const double density = f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      const double inv_rho = 1.0 / density;
+      const double vx      = (f1 - f3 + f5 - f6 - f7 + f8) * inv_rho;
+      const double vy      = (f2 - f4 + f5 + f6 - f7 - f8) * inv_rho;
+      const double v2      = vx * vx + vy * vy;
+
+      const double w0  = rp_w0  * density;
+      const double w14 = rp_w14 * density;
+      const double w58 = rp_w58 * density;
+      const double base      = 1.0 - 1.5 * v2;
+      const double base_vx2  = base + 4.5 * vx * vx;
+      const double base_vy2  = base + 4.5 * vy * vy;
+      const double ppp       = vx + vy;
+      const double pmm       = vy - vx;
+      const double base_pp2  = base + 4.5 * ppp * ppp;
+      const double base_pm2  = base + 4.5 * pmm * pmm;
+      const double vx3       = 3.0 * vx;
+      const double vy3       = 3.0 * vy;
+      const double ppp3      = 3.0 * ppp;
+      const double pmm3      = 3.0 * pmm;
+
+      cq0[j] = A * f0 + w0  *  base;
+      cq1[j] = A * f1 + w14 * (base_vx2 + vx3);
+      cq2[j] = A * f2 + w14 * (base_vy2 + vy3);
+      cq3[j] = A * f3 + w14 * (base_vx2 - vx3);
+      cq4[j] = A * f4 + w14 * (base_vy2 - vy3);
+      cq5[j] = A * f5 + w58 * (base_pp2 + ppp3);
+      cq6[j] = A * f6 + w58 * (base_pm2 + pmm3);
+      cq7[j] = A * f7 + w58 * (base_pp2 - ppp3);
+      cq8[j] = A * f8 + w58 * (base_pm2 - pmm3);
+    }
+  }
+  // implicit barrier at end of omp for
+}
+
+void collision_rows(Mesh* mesh_out, const Mesh* mesh_in, int j_begin, int j_end) {
+  assert(mesh_in->width == mesh_out->width);
+  assert(mesh_in->height == mesh_out->height);
+  // All threads return early together, so no orphaned omp for.
+  if (j_begin >= j_end) return;
+
+  static lbm_collision_impl_t impl = get_collision_impl();
+
+  if (impl == COLLISION_MULTICELL || impl == COLLISION_MULTICELL_VEC ||
+      impl == COLLISION_MULTICELL_VEC_PF) {
+    collision_multicell_vec_rows_omp(mesh_out, mesh_in, j_begin, j_end);
+  } else {
+    // Fallback: cell-by-cell unrolled kernel
+#pragma omp for schedule(static)
+    for (int i = 1; i < (int)mesh_in->width - 1; i++) {
+      for (int j = j_begin; j < j_end; j++) {
+        compute_cell_collision_unrolled(mesh_out, mesh_in, i, j);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// _omp_region variants of propagation functions.
+// Must be called from within an existing #pragma omp parallel region.
+// All omp for loops use nowait for k-pipelining; an explicit barrier at the
+// end ensures all writes are complete before the function returns.
+// ---------------------------------------------------------------------------
+
+void propagation_interior_omp_region(Mesh* mesh_out, const Mesh* mesh_in, bool has_vert_neighbors) {
+  const int W = (int)mesh_out->width;
+  const int H = (int)mesh_out->height;
+  for (int k = 0; k < DIRECTIONS; k++) {
+    const int dx       = (int)direction_matrix[k][0];
+    const int dy       = (int)direction_matrix[k][1];
+    double*       pout = Mesh_get_plane(mesh_out, k);
+    const double* pin  = Mesh_get_plane(mesh_in,  k);
+    const int i_lo     = (dx > 0) ? dx : 0;
+    const int i_hi     = (dx < 0) ? W + dx : W;
+    const int j_lo     = (dy > 0) ? dy : 0;
+    const int j_hi     = (dy < 0) ? H + dy : H;
+
+    if (!has_vert_neighbors) {
+      const size_t nb = (size_t)(j_hi - j_lo) * sizeof(double);
+#pragma omp for schedule(static) nowait
+      for (int i = i_lo; i < i_hi; i++) {
+        memcpy(pout + i * H + j_lo,
+               pin  + (i - dx) * H + j_lo - dy, nb);
+      }
+    } else {
+      const int jm_lo     = (j_lo < 2) ? 2 : j_lo;
+      const int jm_hi     = (j_hi > H - 2) ? H - 2 : j_hi;
+      const size_t nb_mid = (jm_hi > jm_lo) ? (size_t)(jm_hi - jm_lo) * sizeof(double) : 0;
+#pragma omp for schedule(static) nowait
+      for (int i = i_lo; i < i_hi; i++) {
+        const double* bi = pin  + (i - dx) * H - dy;
+        double*       bo = pout + i * H;
+        if (j_lo == 0) bo[0] = bi[0];
+        if (nb_mid > 0) memcpy(bo + jm_lo, bi + jm_lo, nb_mid);
+        if (j_hi == H)  bo[H - 1] = bi[H - 1];
+      }
+    }
+  }
+#pragma omp barrier
+}
+
+void propagation_border_omp_region(Mesh* mesh_out, const Mesh* mesh_in) {
+  const int W = (int)mesh_out->width;
+  const int H = (int)mesh_out->height;
+  for (int k = 0; k < DIRECTIONS; k++) {
+    const int dx       = (int)direction_matrix[k][0];
+    const int dy       = (int)direction_matrix[k][1];
+    double*       pout = Mesh_get_plane(mesh_out, k);
+    const double* pin  = Mesh_get_plane(mesh_in,  k);
+    const int i_lo     = (dx > 0) ? dx : 0;
+    const int i_hi     = (dx < 0) ? W + dx : W;
+#pragma omp for schedule(static) nowait
+    for (int i = i_lo; i < i_hi; i++) {
+      const double* bi = pin  + (i - dx) * H - dy;
+      double*       bo = pout + i * H;
+      bo[1]     = bi[1];
+      bo[H - 2] = bi[H - 2];
+    }
+  }
+#pragma omp barrier
+}

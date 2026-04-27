@@ -64,3 +64,16 @@ void propagation_interior(Mesh* mesh_out, const Mesh* mesh_in, bool has_vert_nei
 
 /// @brief Border propagation: only rows j=1 and j=height-2 (need finished halo).
 void propagation_border(Mesh* mesh_out, const Mesh* mesh_in);
+
+/// @brief BGK collision for i=1..W-2, j in [j_begin, j_end).
+/// Must be called from within an existing #pragma omp parallel region.
+/// Uses #pragma omp for (no new parallel region). Ends with implicit barrier.
+void collision_rows(Mesh* mesh_out, const Mesh* mesh_in, int j_begin, int j_end);
+
+/// @brief Interior propagation inside an existing #pragma omp parallel region.
+/// Uses omp for (no new parallel region). Ends with explicit barrier.
+void propagation_interior_omp_region(Mesh* mesh_out, const Mesh* mesh_in, bool has_vert_neighbors);
+
+/// @brief Border propagation inside an existing #pragma omp parallel region.
+/// Uses omp for (no new parallel region). Ends with explicit barrier.
+void propagation_border_omp_region(Mesh* mesh_out, const Mesh* mesh_in);

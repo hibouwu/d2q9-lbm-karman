@@ -27,10 +27,12 @@ compile_commands.json
 工作规划.md
 config_bench.txt
 
-.aux
-.fdb_latexmk
-.fls
-.log
-.out
-.snm
-.toc
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.snm
+*.toc
+*.xdv
+*.synctex.gz

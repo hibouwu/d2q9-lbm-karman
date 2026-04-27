@@ -1,0 +1,932 @@
+\documentclass[a4paper,11pt,oneside]{report}
+
+% ── 中文支持（XeLaTeX） ───────────────────────────────────────────────────────
+\usepackage[UTF8,zihao=-4]{ctex}
+
+% ── 页面布局与段落 ────────────────────────────────────────────────────────────
+\usepackage{geometry}
+\geometry{a4paper, margin=2.3cm, headheight=16pt}
+\usepackage{setspace}
+\setstretch{1.12}
+\setlength{\parindent}{1.5em}
+\setlength{\parskip}{0.35em}
+
+% ── 数学 ──────────────────────────────────────────────────────────────────────
+\usepackage{amsmath,amssymb}
+
+% ── 表格 ──────────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{makecell}
+\renewcommand\theadfont{\bfseries}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+
+% ── 图形与颜色 ────────────────────────────────────────────────────────────────
+\usepackage[table]{xcolor}
+\usepackage{colortbl}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc,decorations.pathreplacing}
+
+% ── 代码 ──────────────────────────────────────────────────────────────────────
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{gray},
+  stringstyle=\color{orange!80!black},
+  numbers=none,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{black!20},
+  backgroundcolor=\color{black!3},
+  breaklines=true,
+  captionpos=b,
+  language=C++,
+  morekeywords={pragma,omp,parallel,for,simd,reduction,schedule,static,
+                MPI_Send,MPI_Recv,MPI_Isend,MPI_Irecv,MPI_Waitall,MPI_Barrier}
+}
+
+% ── 列表 ──────────────────────────────────────────────────────────────────────
+\usepackage{enumitem}
+\setlist[itemize]{label=\textendash, leftmargin=*, nosep}
+
+% ── 图题风格 ──────────────────────────────────────────────────────────────────
+\captionsetup[figure]{font=footnotesize, justification=justified, singlelinecheck=false}
+
+% ── 节标题格式 ────────────────────────────────────────────────────────────────
+\usepackage{titlesec}
+\titleformat{\chapter}{\Huge\bfseries}{}{0em}{}
+\titleformat{\section}{\large\bfseries}{}{0em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{}{0em}{}
+
+% ── 页眉页脚 ──────────────────────────────────────────────────────────────────
+\usepackage{fancyhdr}
+\fancyhf{}
+\fancyhead[L]{\textit{\reportshorttitle}}
+\fancyhead[R]{性能优化报告}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\setlength{\headheight}{16pt}
+
+% ── 超链接 ────────────────────────────────────────────────────────────────────
+\usepackage{hyperref}
+\hypersetup{colorlinks=false, pdfborder={0 0 0}}
+
+% ── 自定义颜色 ────────────────────────────────────────────────────────────────
+\definecolor{phaseA}{HTML}{2563EB}
+\definecolor{phaseB}{HTML}{16A34A}
+\definecolor{phaseC}{HTML}{D97706}
+\definecolor{phaseD}{HTML}{9333EA}
+\definecolor{phase2}{HTML}{DC2626}
+\definecolor{rowgray}{HTML}{F3F4F6}
+
+% ── 便捷宏 ────────────────────────────────────────────────────────────────────
+\newcommand{\reporttype}{性能优化报告}
+\newcommand{\reporttitletext}{D2Q9 LBM Kármán 涡街求解器}
+\newcommand{\reportshorttitle}{D2Q9 LBM Kármán 求解器}
+\newcommand{\reportauthor}{Wei WEI and Jianye SHI}
+\newcommand{\reportprogram}{MPI + OpenMP 混合并行 D2Q9 格子 Boltzmann 求解器}
+\newcommand{\reportyear}{Linux x86-64 \quad DDR5-5200 \quad GCC~15 \quad Open~MPI~5.0 \quad OpenMP~4.0}
+\newcommand{\reportdate}{\today}
+\newcommand{\code}[1]{\texttt{#1}}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\begin{document}
+
+\pagenumbering{gobble}
+\begin{titlepage}
+  \centering
+  \vspace*{0.8cm}
+  \includegraphics[width=0.92\textwidth]{ISTY-logo-2025-RVB.jpg}\par
+  \vspace{0.9cm}
+  {\Large \reportprogram\par}
+  \vspace{0.4cm}
+  {\large \reportyear\par}
+  \vspace{2.2cm}
+  {\large \reporttype\par}
+  \vspace{0.6cm}
+  {\huge\bfseries \reporttitletext\par}
+  \vspace{1.2cm}
+  {\large 优化历程与性能演进总结\par}
+  \vspace{2.2cm}
+  {\normalsize 基准配置：800\texttimes160 格点，20\,000 步，\texttt{write\_interval=99999}\par}
+  \vspace{0.8cm}
+  \begin{flushleft}
+    \textbf{作者：}\reportauthor
+  \end{flushleft}
+  \vfill
+  {\large \reportdate\par}
+\end{titlepage}
+
+\clearpage
+\pagestyle{fancy}
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+\tableofcontents
+\clearpage
+
+% ══════════════════════════════════════════════════════════════════════════════
+\chapter*{项目背景}
+\addcontentsline{toc}{chapter}{项目背景}
+
+本项目实现二维 D2Q9 格子 Boltzmann 方法（LBM），模拟圆柱绕流中的 Kármán 涡街现象（$Re = 96$）。
+求解器采用 MPI+OpenMP 混合并行策略：MPI 沿行方向分解计算域，OpenMP 并行各 rank 内的内层循环。
+
+性能指标（Figure of Merit，FOM）定义为：
+
+\[
+  \text{FOM} = \frac{W \times H \times N_\text{步数}}{T_\text{wall} \times 10^6}
+  \quad [\text{MLUPS，百万格点更新/秒}]
+\]
+
+其中 $W = 800$，$H = 160$，$N_\text{步数} = 20\,000$。每个时间步包含三个阶段：
+
+\begin{center}
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners=3pt,fill=black!5,minimum width=3.2cm,
+              minimum height=0.8cm,font=\small},
+  arr/.style={-{Stealth[length=5pt]},thick}
+]
+  \node[box] (sc) {\texttt{special\_cells}};
+  \node[box,right=1.2cm of sc] (co) {\texttt{collision}};
+  \node[box,right=1.2cm of co] (pr) {\texttt{propagation}};
+  \draw[arr] (sc) -- (co);
+  \draw[arr] (co) -- (pr);
+  \node[font=\footnotesize,below=0.15cm of co] {BGK 碰撞松弛};
+  \node[font=\footnotesize,below=0.15cm of pr] {流动 + halo 通信};
+\end{tikzpicture}
+\end{center}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\chapter*{优化路线总图（opt\,01–24）}
+\addcontentsline{toc}{chapter}{优化路线总图（opt\,01–24）}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  group/.style={draw,rounded corners=4pt,fill=#1!8,inner sep=6pt},
+  arr/.style={-{Stealth[length=4pt]},thick,#1},
+  fom/.style={font=\footnotesize\itshape,text=black!55}
+]
+
+\node[group=phaseA] (A) at (0,0) {%
+  \begin{minipage}{7cm}
+    \textcolor{phaseA}{\textbf{P1-A \quad 正确性修复（opt01–03）}}\\[2pt]
+    \texttt{01}\ 移除隐藏 \texttt{nanosleep}（每步 1\,s）\\
+    \texttt{02}\ 修复 MLUPS 公式（多乘 \texttt{comm\_size}）\\
+    \texttt{03}\ 修复垂直通信收发大小不匹配
+  \end{minipage}
+};
+
+\node[group=phaseB,below=0.45cm of A] (B) {%
+  \begin{minipage}{7cm}
+    \textcolor{phaseB}{\textbf{P1-B \quad MPI 通信重构（opt04–08）}}\\[2pt]
+    \texttt{04–05}\ 删除 12 个冗余 \texttt{MPI\_Barrier}\\
+    \texttt{06}\ 删除重复 halo 通信阶段\\
+    \texttt{07–08}\ 批量发送：7\,182 条消息 $\to$ 1 条
+  \end{minipage}
+};
+
+\node[group=phaseC,below=0.45cm of B] (C) {%
+  \begin{minipage}{7cm}
+    \textcolor{phaseC}{\textbf{P1-C \quad 缓存局部性 + OpenMP（opt09–13）}}\\[2pt]
+    \texttt{09}\ 修复 collision 循环顺序（stride-1 内层）\\
+    \texttt{10}\ Push $\to$ Pull propagation（消除写竞争）\\
+    \texttt{11–13}\ OpenMP 并行 collision / propagation
+  \end{minipage}
+};
+
+\node[group=phaseD,below=0.45cm of C] (D) {%
+  \begin{minipage}{7cm}
+    \textcolor{phaseD}{\textbf{P1-D \quad 高级优化（opt14–17）}}\\[2pt]
+    \texttt{14}\ 异步 MPI 通信与内部计算重叠\\
+    \texttt{15}\ 向量化审计（\texttt{-march=native} 有回退）\\
+    \texttt{16}\ collision 循环融合 + \texttt{omp simd reduction}\\
+    \texttt{17}\ I/O：分布预计算，消息缩小 9.2$\times$
+  \end{minipage}
+};
+
+\node[group=phase2,below=0.45cm of D] (E) {%
+  \begin{minipage}{7cm}
+    \textcolor{phase2}{\textbf{P2-A \quad 可观测性 + 存储布局重构（opt18–19）}}\\[2pt]
+    \texttt{18}\ Phase 级 \texttt{MPI\_Wtime} profiling 基础设施\\
+    \texttt{19}\ AoS $\to$ SoA 内存重构
+  \end{minipage}
+};
+
+\node[group=phase2,below=0.45cm of E] (F) {%
+  \begin{minipage}{7cm}
+    \textcolor{phase2}{\textbf{P2-B \quad 计算核心重写（opt20–22）}}\\[2pt]
+    \texttt{20}\ SoA \textit{k}-outer propagation\\
+    \texttt{21}\ Multi-cell collision kernel\\
+    \texttt{22}\ 显式 AVX-512 向量化（\texttt{multicell\_vec}）
+  \end{minipage}
+};
+
+\node[group=phase2,below=0.45cm of F] (G) {%
+  \begin{minipage}{7cm}
+    \textcolor{phase2}{\textbf{P2-C \quad 否定实验 + 通信布局优化（opt23–24）}}\\[2pt]
+    \texttt{23}\ FMA 审计 + 软件预取实验（负收益，不采纳）\\
+    \texttt{24}\ 垂直 halo 改 \textit{k}-major pack/unpack
+  \end{minipage}
+};
+
+\draw[arr=phaseA] (A.south) -- (B.north)
+  node[midway,right=0.2cm,fom] {基线：60 MLUPS};
+\draw[arr=phaseB] (B.south) -- (C.north)
+  node[midway,right=0.2cm,fom] {np=2: +50\%\quad np=4: +166\%};
+\draw[arr=phaseC] (C.south) -- (D.north)
+  node[midway,right=0.2cm,fom] {np=1 OMP=4: 194 MLUPS (+220\%)};
+\draw[arr=phaseD] (D.south) -- (E.north)
+  node[midway,right=0.2cm,fom] {集群 MPI 扩展效率 92\%（np=2）};
+\draw[arr=phase2] (E.south) -- (F.north)
+  node[midway,right=0.2cm,fom] {np=2 OMP=4: 279 MLUPS};
+\draw[arr=phase2] (F.south) -- (G.north)
+  node[midway,right=0.2cm,fom] {np=2 OMP=4: 832 MLUPS};
+\node[fom,below=0.3cm of G]{\textbf{最终：905 MLUPS}（np=2, OMP=4）};
+
+\end{tikzpicture}
+\caption{完整优化路线图，opt\,01–24。}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\chapter*{第一部分——优化 01–17}
+\addcontentsline{toc}{chapter}{第一部分——优化 01–17}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P1-A \quad 正确性修复（opt01–03）}
+
+\subsubsection{移除隐藏 \texttt{nanosleep}——opt01}
+
+原始代码在 \code{cmake/tpl.hpp.in} 中将宏 \code{MPI\_HINT\_VTBL}（十六进制编码字符串）
+解码为平台函数名 \code{\_\_builtin\_sync\_fence\_}，在 Linux x86-64 上通过 \code{dlsym}
+动态绑定到 \code{nanosleep(1s)}，并在每步 \code{lbm\_comm\_halo\_exchange} 末尾隐式调用。
+20\,000 步合计浪费约 5.5 小时。修复方案：删除 \code{tpl.hpp.in}、\code{tpl\_loader.hpp.in}
+全文及 \code{communications.cpp} 中的动态调用链。
+
+\subsubsection{修复 MLUPS 公式——opt02}
+
+\begin{lstlisting}
+// 错误：total_cells 多乘了进程数
+total_cells = MESH_WIDTH * MESH_HEIGHT * comm_size;
+// 修复
+total_cells = (uint64_t)MESH_WIDTH * MESH_HEIGHT;
+\end{lstlisting}
+
+该错误导致 np=4 时报告的 MLUPS 虚高 4 倍，使多进程"加速"完全失真，掩盖了全部通信开销。
+
+\subsubsection{修复垂直通信大小不匹配——opt03}
+
+\code{MPI\_Send} 使用 \texttt{count=1}，而配对的 \code{MPI\_Recv} 使用 \texttt{count=9}（DIRECTIONS），
+收发大小不一致，在严格模式 MPI 实现下存在可移植性风险。修正为双侧 \texttt{count=1}，
+同时为 P1-B 的批量通信重构打下基础。
+
+\medskip
+\textbf{P1-A 完成后基线：60 MLUPS（np=1, OMP=1）。}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P1-B \quad MPI 通信重构（opt04–08）}
+
+\subsubsection{冗余同步删除（opt04–06）}
+
+原始 \code{lbm\_comm\_halo\_exchange} 内每个通信子阶段后均有一个 \code{MPI\_Barrier}，共 9 个；
+主时间步循环在 \code{special\_cells}、\code{collision}、\code{propagation} 后各有 1 个，共 3 个。
+阻塞式 \code{MPI\_Send}/\code{MPI\_Recv} 已通过 tag + rank 匹配保证消息隔离，barrier 完全冗余。
+此外，\code{halo\_exchange} 中存在两处重复通信阶段（bottom-left 对角、right-to-left 水平各出现两次）。
+删除全部 12 个 barrier 及两处重复阶段后，np=4 提升 14\%。
+
+\subsubsection{批量消息打包（opt07–08）}
+
+\textbf{根本问题：}垂直 halo 通信按格点逐方向发送，每次 halo 调用产生约
+$(W-2)\times9\approx7\,182$ 条 MPI 消息，MPI 启动开销主导延迟。
+
+\textbf{解决方案：}将整行 halo 数据打包到连续缓冲区后单次发送：
+
+\begin{lstlisting}
+// 修改前（opt03 状态）：约 7182 条消息/次
+for (int i = 1; i < W-1; i++)
+    for (int k = 0; k < 9; k++)
+        MPI_Send(&mesh[i][ghost][k], 1, MPI_DOUBLE, ...);
+
+// 修改后（opt08）：1 条消息/次
+memcpy(buffer, halo_row, W * 9 * sizeof(double));
+MPI_Send(buffer, W * 9, MPI_DOUBLE, ...);
+MPI_Recv(buffer, W * 9, MPI_DOUBLE, ...);
+memcpy(ghost_row, buffer, W * 9 * sizeof(double));
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{配置} & \textbf{基线（opt03）} & \textbf{P1-B 后} & \textbf{提升} \\
+\midrule
+np=1 & 60.16 MLUPS & 58.57 MLUPS & 持平（无通信） \\
+np=2 & 68.66 MLUPS & 102.75 MLUPS & \textbf{+50\%} \\
+np=4 & 28.84 MLUPS & 76.73 MLUPS  & \textbf{+166\%} \\
+\bottomrule
+\end{tabular}
+\caption{P1-B 阶段结果（OMP=1）。}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P1-C \quad 缓存局部性 + OpenMP 并行化（opt09–13）}
+
+\subsubsection{修复 collision 循环顺序——opt09}
+
+AoS 布局下数据按 \code{[x][y][k]} 排列（x 为慢维），而原始 collision 循环以 $j$（y）
+为外层、$i$（x）为内层，内层相邻元素在内存中相距：
+\[
+  \Delta_\text{内层步长} = H \times 9 \times 8 = 11\,520 \text{ 字节} \approx 180 \text{ 条 cache line，}
+\]
+导致大量 cache miss。将循环改为 $i$ 外层、$j$ 内层后，内层步长降为 8 字节（stride-1 连续访问）。
+
+$\Rightarrow$ np=1：\textbf{+10\%}，np=2：\textbf{+26\%}
+
+\subsubsection{Push $\to$ Pull propagation——opt10}
+
+LBM streaming 存在两种等价实现：
+
+\begin{center}
+\begin{tabular}{@{}p{1.5cm}p{5.5cm}p{5cm}@{}}
+\toprule
+\textbf{模式} & \textbf{操作} & \textbf{问题} \\
+\midrule
+Push &
+  源格点 $(i,j)$ 写到目标 $(i{+}dx_k,\,j{+}dy_k)$ &
+  多线程写同一目标存在写竞争，无法并行化 \\
+Pull &
+  目标格点 $(i,j)$ 从邻居 $(i{-}dx_k,\,j{-}dy_k)$ 读取 &
+  每个目标唯一归属一个线程，无竞争，可安全并行 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+等价性由 D2Q9 方向集的原点对称性保证：若 $(dx_k,dy_k)$ 是有效方向，则 $(-dx_k,-dy_k)$ 亦然。
+Pull 模式同时改善读访问规律性，减少 cache miss。
+
+$\Rightarrow$ np=1：\textbf{+14\%}，np=4：\textbf{+51\%}
+
+\subsubsection{OpenMP 并行化——opt11、12、13}
+
+Pull 模式使 propagation 外层 $i$ 循环各迭代完全独立，可直接并行化。
+Collision 各格点间无依赖，同样安全。\code{special\_cells} 仅作用于障碍物边界，并行收益可忽略。
+
+\begin{lstlisting}
+// collision（opt11）——各格点独立
+#pragma omp parallel for schedule(static)
+for (int i = 0; i < W; i++)
+    for (int j = 0; j < H; j++)
+        compute_cell_collision(out, in, i, j);
+
+// propagation（opt13）——pull 模式无写竞争
+#pragma omp parallel for schedule(static)
+for (int i = 0; i < W; i++)
+    for (int j = 0; j < H; j++)
+        for (int k = 0; k < 9; k++)
+            out->f[k][i*H+j] = in->f[k][(i-dx[k])*H+(j-dy[k])];
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{配置} & \textbf{P1-B 后（OMP=1）} & \textbf{P1-C 后（OMP=4）} & \textbf{提升} \\
+\midrule
+np=1 & $\sim$76 MLUPS  & $\sim$194 MLUPS & \textbf{+155\%} \\
+np=2 & $\sim$147 MLUPS & $\sim$202 MLUPS & +37\% \\
+\bottomrule
+\end{tabular}
+\caption{P1-C 阶段结果（OMP=1 $\to$ OMP=4）。}
+\end{table}
+
+\textbf{P1-C 里程碑：np=1, OMP=4 $\approx$ 194 MLUPS，较基线 +220\%。}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P1-D \quad 高级优化（opt14–17）}
+
+\subsubsection{异步 MPI 通信与计算重叠——opt14}
+
+Pull 模式下，内部格点（不与 ghost 行相邻）的 propagation 计算不依赖 halo 数据，
+可在 MPI 通信进行期间并发执行：
+
+\begin{center}
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw, rounded corners=2pt, minimum height=0.65cm, inner xsep=6pt},
+  lbl/.style={font=\footnotesize\bfseries, anchor=east}
+]
+
+% ── 修改前 ────────────────────────────────────────────────────────────────────
+\node[lbl] at (-0.3, 0) {修改前：};
+\node[box, fill=black!8,  minimum width=3.0cm] (h1) at (2.2,  0) {\texttt{halo\_exchange}};
+\node[box, fill=black!8,  minimum width=4.2cm] (p1) at (6.3,  0) {\texttt{propagation（全域）}};
+
+% ── 修改后 ────────────────────────────────────────────────────────────────────
+\node[lbl] at (-0.3, -2.2) {修改后：};
+\node[box, fill=phaseD!25, minimum width=2.0cm] (hs) at (1.2,  -2.2) {\texttt{halo\_start}};
+\node[box, fill=phaseC!25, minimum width=2.8cm] (pi) at (3.9,  -2.2) {\texttt{prop\_interior}};
+\node[box, fill=phaseD!25, minimum width=2.0cm] (hf) at (6.2,  -2.2) {\texttt{halo\_finish}};
+\node[box, fill=phaseC!25, minimum width=2.0cm] (pb) at (8.4,  -2.2) {\texttt{prop\_border}};
+
+% ── 重叠标注 ──────────────────────────────────────────────────────────────────
+\draw[decorate, decoration={brace, amplitude=5pt, raise=3pt},
+      color=phaseD, thick]
+  (hs.north west) -- (hf.north east)
+  node[midway, above=10pt, font=\footnotesize, text=phaseD]
+    {通信 / 计算重叠};
+
+\end{tikzpicture}
+\end{center}
+
+\code{halo\_start} 发起 \code{MPI\_Isend}/\code{MPI\_Irecv}；\code{halo\_finish} 调用 \code{MPI\_Waitall}。
+本地 loopback 环境通信延迟近零，收益不明显；\textbf{InfiniBand 集群上预期提升 5–20\%}。
+
+\subsubsection{向量化审计——opt15（否定实验）}
+
+通过 \code{objdump} 反汇编确认 GCC~15 + \texttt{-O3} 已在 AArch64 上自动生成 NEON SIMD 指令
+（128-bit，2$\times$\code{double}）。测试 \texttt{-march=native} 后性能回退 10–13\%，
+原因是以 P-core 为目标生成的 gather 指令在 macOS 大小核调度下被分配到 E-core 时执行更慢。
+\textbf{结论：保持 \texttt{-O3}，不添加额外编译选项。}
+
+\subsubsection{collision 循环融合——opt16}
+
+原始 \code{compute\_cell\_collision} 内部分 4 个独立循环分别计算 density、$v_x$、$v_y$
+及平衡分布/更新，每次均完整遍历 9 个方向，产生额外循环开销与函数调用。
+将其合并为 2 个循环并添加 \code{\#pragma omp simd reduction}，
+允许编译器在 SIMD 寄存器内并行累加：
+
+\begin{lstlisting}
+// 循环一：单次遍历同时累加三个量
+double density = 0.0, vx = 0.0, vy = 0.0;
+#pragma omp simd reduction(+:density,vx,vy)
+for (int k = 0; k < 9; k++) {
+    density += f[k];
+    vx      += f[k] * cx[k];
+    vy      += f[k] * cy[k];
+}
+// 循环二：计算平衡分布并执行 BGK 更新
+#pragma omp simd
+for (int k = 0; k < 9; k++) {
+    double feq = w[k] * density * (1.0 + ...);
+    f[k] += omega * (feq - f[k]);
+}
+\end{lstlisting}
+
+$\Rightarrow$ 单核：\textbf{+5\%}，多核：\textbf{+1.7\%}
+
+\subsubsection{I/O 策略优化——opt17}
+
+原实现 \code{save\_frame\_all\_domain}：各 rank 将含 ghost cells 的原始 \code{double}
+数据（整个局部网格）发给 rank~0，rank~0 串行重计算密度/速度场后转 \code{float} 写盘。
+
+新实现：各 rank 在本地预计算 \code{lbm\_file\_entry\_t}（density + $v_x$ + $v_y$，
+已转 \code{float}，仅有效格点），直接发送紧凑结果。
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+\textbf{指标} & \textbf{原实现} & \textbf{新实现} & \\
+\midrule
+消息大小（np=2, 800$\times$160） & $\sim$2.1 MB/帧 & $\sim$228 KB/帧 & \textbf{缩小 9.2$\times$} \\
+rank~0 计算量 & 重算全域 & 无 & \\
+\bottomrule
+\end{tabular}
+\caption{I/O 优化效果（opt17）。基准测试使用 \texttt{write\_interval=99999}，I/O 密集场景收益最大。}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{第一部分性能汇总}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}p{3.2cm}R{1.8cm}R{1.8cm}R{1.8cm}R{1.8cm}@{}}
+\toprule
+\textbf{阶段} & \textbf{np=1 OMP=1} & \textbf{np=1 OMP=4} & \textbf{np=2 OMP=1} & \textbf{np=4 OMP=1} \\
+\midrule
+基线（opt03 后） & 60   & —             & 69            & 29  \\
+P1-B（opt08）   & 59   & —             & \textbf{103}  & \textbf{77}  \\
+P1-C（opt13）   & 76   & \textbf{194}  & 147           & —   \\
+P1-D（opt17）   & 65.7 & 146$^\dagger$ & 121.9         & 118 \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize 单位：MLUPS。$^\dagger$集群多进程场景收益正向。}
+\end{tabular}
+\caption{第一部分性能演进。}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=12cm, height=6cm,
+  xlabel={优化里程碑},
+  ylabel={FOM（MLUPS）},
+  xtick={1,2,3,4,5},
+  xticklabels={基线, P1-B, P1-C(OMP=1), P1-C(OMP=4), P1-D(OMP=4)},
+  xticklabel style={rotate=20,anchor=east,font=\small},
+  ymin=0, ymax=220,
+  ymajorgrids=true, grid style=dashed,
+  legend style={at={(0.03,0.97)},anchor=north west,font=\small},
+  legend cell align=left,
+]
+\addplot[color=phaseA,mark=*,thick] coordinates {
+  (1,60)(2,59)(3,76)(4,76)(5,65.7)
+};
+\addlegendentry{np=1, OMP=1}
+
+\addplot[color=phaseB,mark=square*,thick] coordinates {
+  (1,69)(2,103)(3,147)(4,147)(5,122)
+};
+\addlegendentry{np=2, OMP=1}
+
+\addplot[color=phaseC,mark=triangle*,thick] coordinates {
+  (1,29)(2,77)(3,77)(4,77)(5,77)
+};
+\addlegendentry{np=4, OMP=1}
+
+\addplot[color=phaseD,mark=diamond*,thick,dashed] coordinates {
+  (3,76)(4,194)(5,146)
+};
+\addlegendentry{np=1, OMP=4}
+\end{axis}
+\end{tikzpicture}
+\caption{第一部分 FOM 演进曲线（MLUPS）。}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\chapter*{第二部分——优化 18–26}
+\addcontentsline{toc}{chapter}{第二部分——优化 18–26}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P2-A \quad 可观测性基础设施与存储布局重构（opt18–19）}
+
+\subsubsection{Phase 级 profiling 基础设施——opt18}
+
+第一部分只有整段 wall time，无法定位阶段瓶颈。opt18 在
+\code{special\_cells}、\code{collision}、\code{halo\_start}、
+\code{propagation\_interior}、\code{halo\_finish}、
+\code{propagation\_border} 周围加入
+\code{LBM\_PROF\_BEGIN}/\code{LBM\_PROF\_END}，底层计时使用
+\code{MPI\_Wtime}，汇总时输出 avg/max/pct\_loop。该功能由
+\code{LBM\_ENABLE\_PROFILING=ON} 控制；关闭时不进入计时代码。opt18
+不改动计算路径，FOM 无变化，作用是为 opt19 之后的判断提供统一口径。
+
+\subsubsection{AoS $\to$ SoA 内存布局重构——opt19}
+
+opt19 将分布函数从 AoS \code{cell[i][j].f[0..8]} 改为 SoA
+\code{cells[k][x * H + y]}。原布局下，同一方向 $k$ 的相邻格点相距
+$9 \times 8 = 72$ 字节；改为 SoA 后，同一平面内访问连续，为后续
+SIMD 和 plane-based propagation 提供前提。总数据量不变，仍为
+$9 \times W \times H \times 8$ 字节。
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{配置} & \textbf{AoS（opt17）} & \textbf{SoA v1.1（opt19）} & \textbf{变化} \\
+\midrule
+np=1, OMP=4 & $\sim$146 MLUPS & 157.79 MLUPS & +8\% \\
+np=2, OMP=4 & $\sim$216 MLUPS & 278.66 MLUPS & +29\% \\
+np=4, OMP=4 & $\sim$261 MLUPS & 368.60 MLUPS & +41\% \\
+\bottomrule
+\end{tabular}
+\caption{AoS $\to$ SoA 后 FOM（opt19 v1.1）。np=2 OMP=4 作为 P2 阶段基准。}
+\end{table}
+
+opt19 v1.0 曾出现回退：数据布局已改，\code{collision} 仍沿用逐格点 AoS
+访问方式。v1.1 同步修正访问路径后，np=2 OMP=4 提升到 278.66 MLUPS，
+作为第二部分后续实验的基线。
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P2-B \quad 计算核心重写（opt20–22）}
+
+\subsubsection{SoA \textit{k}-outer propagation——opt20}
+
+opt19 之后，propagation 仍按 $i$-$j$-$k$ 顺序访问，内层循环持续在不同平面间切换。
+opt20 将 $k$ 提到最外层，每次迭代只处理一个源平面和一个目标平面：
+
+\begin{lstlisting}
+for (int k = 0; k < DIRECTIONS; k++) {
+    const double* src = in->cells  + k * W * H;
+    double*       dst = out->cells + k * W * H;
+    // i-j 内循环：stride-1 连续访问，memcpy 可向量化
+    for (int i = 1; i < W - 1; i++)
+        for (int j = j_begin; j < j_end; j++)
+            dst[i*H + j] = src[(i - dx[k])*H + (j - dy[k])];
+}
+\end{lstlisting}
+
+每次 $k$ 迭代只访问两个平面，数据量约为
+$2 \times 800 \times 160 \times 8 \approx 2$ MB。该改动将 np=2 OMP=4
+从 278.66 提升到 319.07 MLUPS；profiling 中 propagation 阶段下降约 5--6$\times$。
+
+\subsubsection{Multi-cell collision kernel——opt21}
+
+opt20 的 collision 仍按格点调用 \code{compute\_cell\_collision}。调用边界过细，
+编译器难以跨格点优化。opt21 将 $i$ 循环移入 kernel，每次处理整列
+\code{j=1..H-2}：
+
+\begin{lstlisting}
+// 原实现（opt20）：外层 i 循环逐格点调用
+for (int i = 1; i < W-1; i++)
+    for (int j = 1; j < H-1; j++)
+        compute_cell_collision(out, in, i, j);
+
+// opt21：kernel 内处理整列 j
+static void collision_multicell(Mesh* out, const Mesh* in) {
+#pragma omp parallel for schedule(static)
+    for (int i = 1; i < W-1; i++)
+        for (int j = 1; j < H-1; j++) { /* ... BGK ... */ }
+}
+\end{lstlisting}
+
+np=2 OMP=4 从 319.07 提升到 422.99 MLUPS，增幅 33\%。
+
+\subsubsection{显式 AVX-512 向量化——opt22}
+
+opt21 的主要限制是别名分析。编译器在 \code{-fopt-info-vec-missed} 中报告
+\code{may alias}，内层 $j$ 循环因此没有向量化。opt22 在 kernel 内为平面指针和列指针
+显式添加 \code{\_\_restrict\_\_}，并配合 \code{\#pragma GCC ivdep}：
+
+\begin{lstlisting}
+static void collision_multicell_vec(Mesh* out, const Mesh* in) {
+    // 提升平面指针，显式声明 restrict
+    double* __restrict__ out0 = out->cells + 0*W*H;
+    double* __restrict__ in0  = in->cells  + 0*W*H;
+    // ...（9 个平面各一指针）...
+#pragma omp parallel for schedule(static)
+    for (int i = 1; i < W - 1; i++) {
+        double* __restrict__ col_out0 = out0 + i*H;
+        double* __restrict__ col_in0  = in0  + i*H;
+        // ...（9 列各一指针）...
+#pragma GCC ivdep
+        for (int j = 1; j < H - 1; j++) {
+            // BGK 内核，全部通过列指针访问
+        }
+    }
+}
+\end{lstlisting}
+
+反汇编可见 \code{vmovupd} 和 \code{vfmadd}，向量宽度为 AVX-512 的 8 路
+\code{double}。
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{配置} & \textbf{opt21} & \textbf{opt22} & \textbf{提升} \\
+\midrule
+np=1, OMP=4 & 293.52 & 757.20 & \textbf{+158\%} \\
+np=2, OMP=4 & 422.99 & 832.34 & \textbf{+97\%} \\
+\bottomrule
+\end{tabular}
+\caption{AVX-512 向量化效果（opt22）。FP64 吞吐量达理论峰值的约 65\%。}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P2-C \quad 否定实验与通信布局优化（opt23–24）}
+
+\subsubsection{FMA 审计——opt23（确认，无需干预）}
+
+opt23 先检查 FMA 生成情况。反汇编中可见 92 条 \code{vfmadd231pd}，
+BGK 平衡分布的乘加已经融合，这一项没有单独优化空间。
+
+\subsubsection{软件预取实验——opt23（否定）}
+
+在 \code{collision\_multicell\_vec} 内层循环前插入 \code{\_\_builtin\_prefetch}（
+提前 2 个 cache line），测试结果：
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrr@{}}
+\toprule
+\textbf{配置} & \textbf{FOM 变化} & \textbf{结论} \\
+\midrule
+np=1, OMP=4 & $-0.7\%$ & 可忽略 \\
+np=2, OMP=4 & $-4.4\%$ & 负收益 \\
+np=4, OMP=4 & $-5.0\%$ & 负收益 \\
+\bottomrule
+\end{tabular}
+\caption{软件预取对 FOM 的影响（opt23）。多线程场景下负收益，不采纳。}
+\end{table}
+
+负收益出现在多线程配置。内层循环步长为 8 字节，硬件 prefetcher 已能跟上；
+软件预取额外占用带宽，也引入指令开销，因此没有保留。
+
+\subsubsection{\textit{k}-major 垂直 halo pack/unpack——opt24}
+
+opt24 处理 SoA 之后的 halo 打包路径。垂直 halo 行的 9 个方向分量分散在 9 个平面，
+相邻平面间距约为 $W \times H \times 8 = 1{,}024$ KB，原来的 \code{vert\_pack}
+会在平面之间反复跳转。opt24 改为 \textit{k}-major 打包，先遍历 $k$，再遍历 $i$：
+
+\begin{lstlisting}
+// 修改前（opt22）：i-major，跨平面跳转
+for (int i = 1; i < W-1; i++)
+    for (int k = 0; k < 9; k++)
+        buf[i*9 + k] = cells[k*W*H + i*H + j_halo];
+
+// 修改后（opt24）：k-major，单平面连续
+for (int k = 0; k < 9; k++)
+    memcpy(buf + k*(W-2),
+           cells + k*W*H + 1*H + j_halo,
+           (W-2) * sizeof(double));
+\end{lstlisting}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{配置} & \textbf{opt22} & \textbf{opt24} & \textbf{提升} \\
+\midrule
+np=2, OMP=4 & 832.34 & 905.13 & \textbf{+8.7\%} \\
+np=4, OMP=4 & —      & 705.52 & — \\
+\bottomrule
+\end{tabular}
+\caption{\textit{k}-major halo 效果（opt24）。profiling 显示 \code{vert\_unpack}
+耗时降低 28--40\%，\code{halo\_finish} 降低 18\%。}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{P2-D \quad MPI/计算重叠深化（opt25–26）}
+
+\subsubsection{halo 瓶颈诊断与否定实验——opt25}
+
+opt24 之后，np=2 OMP=8 的 profiling 显示 \code{halo\_finish} 仍占 loop 的 29.4\%，
+其中 \code{waitall} 为 7.7\%，\code{vert\_unpack} 为 21.5\%。opt25 的工作是判断这部分时间来自哪里。
+
+诊断结果有两点。第一，intra-node 共享内存 MPI 使用 eager protocol，
+\code{MPI\_Isend} 返回时数据通常已完成本地拷贝，\code{Waitall} 的主要等待来自
+各 rank 到达等待点的时间差。第二，np$\ge 3$ 时上下边界 rank 与中间 rank 的 halo
+工作量不同，\code{vert\_pack} 和 \code{vert\_unpack} 的 max/min 差异会直接放大
+\code{waitall}。
+
+本轮还做了两项否定实验。其一是交错 pack，在每个 $k$ 块后提前发起
+\code{MPI\_Isend}；结果 FOM 下降约 3\%，非阻塞调用次数增加带来的开销更大。
+其二是 split collision，将 border collision 提前到 \code{halo\_start} 之前；
+结果 FOM 下降 34\%，额外的 OMP 区域触发了明显的 worker 唤醒/休眠成本。
+opt25 的结论很直接：问题在 overlap 窗口和结构不均衡，继续细抠当前通信提交顺序收益有限。
+
+\subsubsection{单一 \texttt{omp parallel} 区域重构——opt26}
+
+opt26 处理的是 opt25 中 split collision 的结构问题。改动目标是保留更长的
+overlap 窗口，同时避免重复进入 OMP 并行区。主循环在
+\code{has\_vn=true} 路径下重写为一个外层 \code{\#pragma omp parallel}，
+内部顺序为 border collision、\code{halo\_start}、interior collision、
+\code{propagation\_interior}、\code{halo\_finish}、\code{propagation\_border}；
+并行工作使用 \code{omp for}，MPI 调用限制在 \code{omp master} 中。
+
+为此新增三组接口，调用方必须已处于并行区内：
+
+\begin{lstlisting}
+// 调用方负责已处于 omp parallel 区域内；使用 omp for（隐式 barrier）
+void collision_rows(Mesh* out, const Mesh* in, int j_begin, int j_end);
+
+// 内部使用 omp for nowait（k-pipeline），函数末尾显式 omp barrier
+void propagation_interior_omp_region(Mesh* out, const Mesh* in, bool has_vn);
+void propagation_border_omp_region(Mesh* out, const Mesh* in);
+\end{lstlisting}
+
+主循环在 \code{has\_vn} 路径下的结构如下：
+
+\begin{lstlisting}
+#pragma omp parallel
+{
+    // 1. border collision (j=1, j=H-2) -> 隐式 barrier
+    omp master: PROF_BEGIN(COLLISION)
+    collision_rows(&temp, &mesh, 1, 2);
+    collision_rows(&temp, &mesh, H-2, H-1);
+
+    // 2. 发起 halo（master 只），非 master 立即进入步骤 3
+    omp master: halo_exchange_start(...)
+    // 无 barrier：interior collision 不读 ghost row
+
+    // 3. interior collision (j=2..H-3)，与 MPI 传输重叠 -> 隐式 barrier
+    collision_rows(&temp, &mesh, 2, H-2);
+
+    // 4. propagation interior，与 MPI 传输重叠（末尾显式 barrier）
+    propagation_interior_omp_region(&mesh, &temp, true);
+
+    // 5. 等待 halo 完成（master 只）
+    omp master: halo_exchange_finish(...)
+    #pragma omp barrier  // ghost row 写入后才可做 border propagation
+
+    // 6. border propagation（末尾显式 barrier）
+    propagation_border_omp_region(&mesh, &temp);
+}
+\end{lstlisting}
+
+barrier 只保留在依赖关系需要的位置：border collision 结束后再允许
+master 打包；\code{halo\_start} 与 interior collision 之间不加 barrier；
+\code{halo\_finish} 之后保留一次显式 barrier，保证 ghost row 写入完成后再进入
+\code{propagation\_border}。
+
+\textbf{性能结果（np=2, OMP=8，intra-node）：}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{指标} & \textbf{opt25（基准）} & \textbf{opt26} & \textbf{变化} \\
+\midrule
+loop total (avg/call) & 0.1591 ms & 0.1586 ms & $-0.3\%$ \\
+FOM & 800.27 MLUPS & 802.31 MLUPS & \textbf{$+0.3\%$} \\
+halo\_finish (avg) & 0.0467 ms & 0.0438 ms & $-6.2\%$ \\
+vert\_unpack (avg) & 0.0342 ms & 0.0270 ms & $-21\%$ \\
+\bottomrule
+\end{tabular}
+\caption{opt26 性能对比（np=2, OMP=8，AMD Ryzen 9 8940HX，单节点）。
+FOM 增幅在测量噪声范围（$\pm 1\%$）以内。}
+\end{table}
+
+这组结果接近持平。测试环境是 intra-node 共享内存 MPI，\code{Isend} 的本地拷贝成本很低，
+\code{Waitall} 主要反映 rank 间到达时间差。opt26 将 \code{halo\_finish} 和
+\code{vert\_unpack} 压低了一部分，但 FOM 变化仍落在 $\pm 1\%$ 噪声内。
+当前能确认的是结构重构已经完成，单一 parallel 区域消除了 opt25 中额外的线程唤醒成本。
+跨节点收益仍待实测；本节结论只覆盖这里给出的单节点配置。
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{第二部分性能结果}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lR{1.5cm}R{1.5cm}R{1.5cm}R{1.5cm}R{1.5cm}R{1.8cm}@{}}
+\toprule
+\textbf{配置} & \textbf{opt19} & \textbf{opt20} & \textbf{opt21} & \textbf{opt22} & \textbf{opt24}
+  & \textbf{opt26$^\dagger$} \\
+ & \textbf{SoA} & \textbf{\textit{k}-outer} & \textbf{multicell} & \textbf{vec}
+  & \textbf{\textit{k}-major} & \textbf{overlap} \\
+\midrule
+np=1, OMP=4 & 157.79 & 212.93 & 293.52 & 757.20 & — & — \\
+np=2, OMP=4 & 278.66 & 319.07 & 422.99 & 832.34 & \textbf{905.13} & — \\
+np=2, OMP=8 & — & — & — & — & 800.27 & 802.31 \\
+np=4, OMP=4 & 368.60 & 357.15 & 508.14 & —      & \textbf{705.52} & — \\
+\bottomrule
+\multicolumn{7}{l}{\footnotesize 单位：MLUPS。平台：AMD Ryzen~9~8940HX，Linux x86-64，
+  GCC~15，MPICH~4.3.0。}\\
+\multicolumn{7}{l}{\footnotesize $^\dagger$opt26 为 intra-node 结果；多节点基准测试待进行。}
+\end{tabular}
+\caption{第二部分各优化步骤 FOM 对比。}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\chapter*{全程性能演进}
+\addcontentsline{toc}{chapter}{全程性能演进}
+
+\begin{table}[H]
+\centering
+\setlength{\extrarowheight}{2pt}
+\begin{tabular}{@{}p{4.8cm}p{2.2cm}rrr@{}}
+\toprule
+\textbf{里程碑} & \textbf{配置} & \textbf{FOM} & \textbf{较上阶段} & \textbf{较基线} \\
+\midrule
+原始代码（含隐藏 sleep） & np=1 OMP=1 & $\approx$0 & — & — \\
+\rowcolor{rowgray}
+P1-A 完成（opt03）  & np=1 OMP=1 & 60  & 基线确立 & — \\
+P1-B 完成（opt08）  & np=2 OMP=1 & 103 & \textbf{+72\%} & +72\% \\
+\rowcolor{rowgray}
+P1-C 完成（opt13）  & np=1 OMP=4 & 194 & \textbf{+88\%} & \textbf{+220\%} \\
+P1-D 完成（opt17）  & np=2 OMP=1 & 122 & 集群优化 & — \\
+\rowcolor{rowgray}
+P2-A：SoA（opt19）  & np=2 OMP=4 & 279 & 新基线 & — \\
+P2-B：\textit{k}-outer（opt20） & np=2 OMP=4 & 319 & +15\% & — \\
+\rowcolor{rowgray}
+P2-B：multicell（opt21） & np=2 OMP=4 & 423 & \textbf{+33\%} & — \\
+P2-B：AVX-512（opt22）   & np=2 OMP=4 & 832 & \textbf{+97\%} & — \\
+\rowcolor{rowgray}
+P2-C：\textit{k}-major（opt24） & np=2 OMP=4 & \textbf{905} & +9\% & \textbf{$\times$15} \\
+\bottomrule
+\end{tabular}
+\caption{全程优化历史。最终 FOM 为第一部分基线的 15 倍。}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\vspace{1cm}
+\textit{（待补充）}
+\vspace{1cm}
+\caption{全程 FOM 演进曲线。}
+\end{figure}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section*{附录：正确性验证}
+\addcontentsline{toc}{section}{附录：正确性验证}
+
+所有优化完成后均执行以下验证流程：
+
+\begin{itemize}
+  \item \textbf{数值精度：}与修改前输出逐格点 max-delta 比较，差异在 FP64 机器精度（$\sim10^{-15}$）量级以内。
+  \item \textbf{多进程一致性：}np=1 与 np=2/4 结果对比，差异为正常浮点累积顺序误差，不影响物理结论。
+  \item \textbf{物理定性检查：}在 $Re=96$ 条件下 Kármán 涡街正常出现，涡脱落对称性在所有进程数配置下均正确。
+\end{itemize}
+
+\end{document}
