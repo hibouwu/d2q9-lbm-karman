@@ -84,14 +84,21 @@ double compute_equilibrium_profile(Vector velocity, double density, int directio
 // A/B experiment: collision implementation dispatch
 // ---------------------------------------------------------------------------
 
-typedef enum { COLLISION_BASELINE, COLLISION_UNROLLED } lbm_collision_impl_t;
+typedef enum {
+  COLLISION_BASELINE,
+  COLLISION_UNROLLED,
+  COLLISION_MULTICELL,
+  COLLISION_MULTICELL_VEC,
+} lbm_collision_impl_t;
 
 static lbm_collision_impl_t get_collision_impl(void) {
   const char* env = getenv("LBM_COLLISION_IMPL");
-  if (env == NULL || strcmp(env, "baseline") == 0) return COLLISION_BASELINE;
+  if (env == NULL || strcmp(env, "multicell_vec") == 0) return COLLISION_MULTICELL_VEC;
+  if (strcmp(env, "multicell") == 0) return COLLISION_MULTICELL;
+  if (strcmp(env, "baseline") == 0) return COLLISION_BASELINE;
   if (strcmp(env, "unrolled") == 0) return COLLISION_UNROLLED;
-  fprintf(stderr, "[LBM] Unknown LBM_COLLISION_IMPL='%s', using baseline\n", env);
-  return COLLISION_BASELINE;
+  fprintf(stderr, "[LBM] Unknown LBM_COLLISION_IMPL='%s', using multicell_vec\n", env);
+  return COLLISION_MULTICELL_VEC;
 }
 
 // ── SoA hand-unrolled D2Q9 BGK (优化19 实验路径) ────────────────────────────
@@ -165,6 +172,204 @@ void compute_cell_collision(Mesh* out, const Mesh* in, int x, int y) {
     const double p    = direction_matrix[k][0] * vx + direction_matrix[k][1] * vy;
     const double f_eq = equil_weight[k] * density * (1.0 + 3.0 * p + 4.5 * p * p - 1.5 * v2);
     Mesh_set_f(out, k, x, y, fk - RELAX_PARAMETER * (fk - f_eq));
+  }
+}
+
+// ── SoA multi-cell: hoisted plane pointers, j-continuous stride-1 (优化21) ──
+//
+// Plane pointers p0..p8 (read) and q0..q8 (write) are hoisted outside the i
+// loop so that inside the j loop, cp_k[j] is a simple stride-1 load.  With
+// __restrict__, the compiler can verify non-aliasing across all 18 streams and
+// auto-vectorize the j loop: SIMD lanes carry consecutive cells, not directions.
+//
+// No #pragma omp simd: on Zen 4, vdivpd zmm throughput ≈ 1/24 CPI vs
+// 8 pipelined scalar divsd ≈ 2 CPI.  The explicit pragma would force vdivpd;
+// leaving it to the auto-vectorizer lets the compiler balance throughput.
+static void collision_multicell(Mesh* mesh_out, const Mesh* mesh_in) {
+  const int W = (int)mesh_in->width;
+  const int H = (int)mesh_in->height;
+
+  // Per-run constants (RELAX_PARAMETER is a compile-time or load-time constant)
+  const double A      = 1.0 - RELAX_PARAMETER;
+  const double rp_w0  = (4.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w14 = (1.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w58 = (1.0 / 36.0) * RELAX_PARAMETER;
+
+  // Plane base pointers — non-overlapping regions of their respective allocations
+  const double* __restrict__ p0 = Mesh_get_plane(mesh_in,  0);
+  const double* __restrict__ p1 = Mesh_get_plane(mesh_in,  1);
+  const double* __restrict__ p2 = Mesh_get_plane(mesh_in,  2);
+  const double* __restrict__ p3 = Mesh_get_plane(mesh_in,  3);
+  const double* __restrict__ p4 = Mesh_get_plane(mesh_in,  4);
+  const double* __restrict__ p5 = Mesh_get_plane(mesh_in,  5);
+  const double* __restrict__ p6 = Mesh_get_plane(mesh_in,  6);
+  const double* __restrict__ p7 = Mesh_get_plane(mesh_in,  7);
+  const double* __restrict__ p8 = Mesh_get_plane(mesh_in,  8);
+  double* __restrict__       q0 = Mesh_get_plane(mesh_out, 0);
+  double* __restrict__       q1 = Mesh_get_plane(mesh_out, 1);
+  double* __restrict__       q2 = Mesh_get_plane(mesh_out, 2);
+  double* __restrict__       q3 = Mesh_get_plane(mesh_out, 3);
+  double* __restrict__       q4 = Mesh_get_plane(mesh_out, 4);
+  double* __restrict__       q5 = Mesh_get_plane(mesh_out, 5);
+  double* __restrict__       q6 = Mesh_get_plane(mesh_out, 6);
+  double* __restrict__       q7 = Mesh_get_plane(mesh_out, 7);
+  double* __restrict__       q8 = Mesh_get_plane(mesh_out, 8);
+
+#pragma omp parallel for schedule(static)
+  for (int i = 1; i < W - 1; i++) {
+    const size_t col_off = (size_t)i * H;
+    // Column pointers — stride-1 in j for every direction plane
+    const double* cp0 = p0 + col_off;  const double* cp1 = p1 + col_off;
+    const double* cp2 = p2 + col_off;  const double* cp3 = p3 + col_off;
+    const double* cp4 = p4 + col_off;  const double* cp5 = p5 + col_off;
+    const double* cp6 = p6 + col_off;  const double* cp7 = p7 + col_off;
+    const double* cp8 = p8 + col_off;
+    double* cq0 = q0 + col_off;  double* cq1 = q1 + col_off;
+    double* cq2 = q2 + col_off;  double* cq3 = q3 + col_off;
+    double* cq4 = q4 + col_off;  double* cq5 = q5 + col_off;
+    double* cq6 = q6 + col_off;  double* cq7 = q7 + col_off;
+    double* cq8 = q8 + col_off;
+
+    for (int j = 1; j < H - 1; j++) {
+      const double f0 = cp0[j], f1 = cp1[j], f2 = cp2[j];
+      const double f3 = cp3[j], f4 = cp4[j], f5 = cp5[j];
+      const double f6 = cp6[j], f7 = cp7[j], f8 = cp8[j];
+
+      const double density = f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      const double inv_rho = 1.0 / density;
+      const double vx      = (f1 - f3 + f5 - f6 - f7 + f8) * inv_rho;
+      const double vy      = (f2 - f4 + f5 + f6 - f7 - f8) * inv_rho;
+      const double v2      = vx * vx + vy * vy;
+
+      const double w0  = rp_w0  * density;
+      const double w14 = rp_w14 * density;
+      const double w58 = rp_w58 * density;
+      const double base      = 1.0 - 1.5 * v2;
+      const double base_vx2  = base + 4.5 * vx * vx;
+      const double base_vy2  = base + 4.5 * vy * vy;
+      const double ppp       = vx + vy;
+      const double pmm       = vy - vx;
+      const double base_pp2  = base + 4.5 * ppp * ppp;
+      const double base_pm2  = base + 4.5 * pmm * pmm;
+      const double vx3       = 3.0 * vx;
+      const double vy3       = 3.0 * vy;
+      const double ppp3      = 3.0 * ppp;
+      const double pmm3      = 3.0 * pmm;
+
+      cq0[j] = A * f0 + w0  *  base;
+      cq1[j] = A * f1 + w14 * (base_vx2 + vx3);
+      cq2[j] = A * f2 + w14 * (base_vy2 + vy3);
+      cq3[j] = A * f3 + w14 * (base_vx2 - vx3);
+      cq4[j] = A * f4 + w14 * (base_vy2 - vy3);
+      cq5[j] = A * f5 + w58 * (base_pp2 + ppp3);
+      cq6[j] = A * f6 + w58 * (base_pm2 + pmm3);
+      cq7[j] = A * f7 + w58 * (base_pp2 - ppp3);
+      cq8[j] = A * f8 + w58 * (base_pm2 - pmm3);
+    }
+  }
+}
+
+// ── SoA multi-cell + vectorization fix (优化21 向量化实验) ───────────────────
+//
+// Same structure as collision_multicell, with two additions:
+//   1. Column pointers cp0..cp8 / cq0..cq8 carry __restrict__ so GCC's alias
+//      analysis sees them as non-aliasing inside the OMP closure.  Without this,
+//      __restrict__ on the plane base pointers is not propagated through the
+//      pointer-arithmetic expression (p0 + col_off) and GCC refuses to vectorize.
+//   2. #pragma GCC ivdep asserts no loop-carried dependencies on the j loop.
+//
+// Root cause of non-vectorization in multicell: GCC reports
+//   "no vectype for stmt: f0 = *cp0; scalar_type: const double"
+// because without __restrict__ on cp0 itself, GCC cannot rule out aliasing
+// between cp0..cp8 (reads) and cq0..cq8 (writes) inside the OMP inner function.
+static void collision_multicell_vec(Mesh* mesh_out, const Mesh* mesh_in) {
+  const int W = (int)mesh_in->width;
+  const int H = (int)mesh_in->height;
+
+  const double A      = 1.0 - RELAX_PARAMETER;
+  const double rp_w0  = (4.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w14 = (1.0 / 9.0)  * RELAX_PARAMETER;
+  const double rp_w58 = (1.0 / 36.0) * RELAX_PARAMETER;
+
+  const double* __restrict__ p0 = Mesh_get_plane(mesh_in,  0);
+  const double* __restrict__ p1 = Mesh_get_plane(mesh_in,  1);
+  const double* __restrict__ p2 = Mesh_get_plane(mesh_in,  2);
+  const double* __restrict__ p3 = Mesh_get_plane(mesh_in,  3);
+  const double* __restrict__ p4 = Mesh_get_plane(mesh_in,  4);
+  const double* __restrict__ p5 = Mesh_get_plane(mesh_in,  5);
+  const double* __restrict__ p6 = Mesh_get_plane(mesh_in,  6);
+  const double* __restrict__ p7 = Mesh_get_plane(mesh_in,  7);
+  const double* __restrict__ p8 = Mesh_get_plane(mesh_in,  8);
+  double* __restrict__       q0 = Mesh_get_plane(mesh_out, 0);
+  double* __restrict__       q1 = Mesh_get_plane(mesh_out, 1);
+  double* __restrict__       q2 = Mesh_get_plane(mesh_out, 2);
+  double* __restrict__       q3 = Mesh_get_plane(mesh_out, 3);
+  double* __restrict__       q4 = Mesh_get_plane(mesh_out, 4);
+  double* __restrict__       q5 = Mesh_get_plane(mesh_out, 5);
+  double* __restrict__       q6 = Mesh_get_plane(mesh_out, 6);
+  double* __restrict__       q7 = Mesh_get_plane(mesh_out, 7);
+  double* __restrict__       q8 = Mesh_get_plane(mesh_out, 8);
+
+#pragma omp parallel for schedule(static)
+  for (int i = 1; i < W - 1; i++) {
+    const size_t col_off = (size_t)i * H;
+    // __restrict__ on column pointers: propagates non-aliasing into the j loop
+    const double* __restrict__ cp0 = p0 + col_off;
+    const double* __restrict__ cp1 = p1 + col_off;
+    const double* __restrict__ cp2 = p2 + col_off;
+    const double* __restrict__ cp3 = p3 + col_off;
+    const double* __restrict__ cp4 = p4 + col_off;
+    const double* __restrict__ cp5 = p5 + col_off;
+    const double* __restrict__ cp6 = p6 + col_off;
+    const double* __restrict__ cp7 = p7 + col_off;
+    const double* __restrict__ cp8 = p8 + col_off;
+    double* __restrict__ cq0 = q0 + col_off;
+    double* __restrict__ cq1 = q1 + col_off;
+    double* __restrict__ cq2 = q2 + col_off;
+    double* __restrict__ cq3 = q3 + col_off;
+    double* __restrict__ cq4 = q4 + col_off;
+    double* __restrict__ cq5 = q5 + col_off;
+    double* __restrict__ cq6 = q6 + col_off;
+    double* __restrict__ cq7 = q7 + col_off;
+    double* __restrict__ cq8 = q8 + col_off;
+
+#pragma GCC ivdep
+    for (int j = 1; j < H - 1; j++) {
+      const double f0 = cp0[j], f1 = cp1[j], f2 = cp2[j];
+      const double f3 = cp3[j], f4 = cp4[j], f5 = cp5[j];
+      const double f6 = cp6[j], f7 = cp7[j], f8 = cp8[j];
+
+      const double density = f0 + f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      const double inv_rho = 1.0 / density;
+      const double vx      = (f1 - f3 + f5 - f6 - f7 + f8) * inv_rho;
+      const double vy      = (f2 - f4 + f5 + f6 - f7 - f8) * inv_rho;
+      const double v2      = vx * vx + vy * vy;
+
+      const double w0  = rp_w0  * density;
+      const double w14 = rp_w14 * density;
+      const double w58 = rp_w58 * density;
+      const double base      = 1.0 - 1.5 * v2;
+      const double base_vx2  = base + 4.5 * vx * vx;
+      const double base_vy2  = base + 4.5 * vy * vy;
+      const double ppp       = vx + vy;
+      const double pmm       = vy - vx;
+      const double base_pp2  = base + 4.5 * ppp * ppp;
+      const double base_pm2  = base + 4.5 * pmm * pmm;
+      const double vx3       = 3.0 * vx;
+      const double vy3       = 3.0 * vy;
+      const double ppp3      = 3.0 * ppp;
+      const double pmm3      = 3.0 * pmm;
+
+      cq0[j] = A * f0 + w0  *  base;
+      cq1[j] = A * f1 + w14 * (base_vx2 + vx3);
+      cq2[j] = A * f2 + w14 * (base_vy2 + vy3);
+      cq3[j] = A * f3 + w14 * (base_vx2 - vx3);
+      cq4[j] = A * f4 + w14 * (base_vy2 - vy3);
+      cq5[j] = A * f5 + w58 * (base_pp2 + ppp3);
+      cq6[j] = A * f6 + w58 * (base_pm2 + pmm3);
+      cq7[j] = A * f7 + w58 * (base_pp2 - ppp3);
+      cq8[j] = A * f8 + w58 * (base_pm2 - pmm3);
+    }
   }
 }
 
@@ -255,7 +460,11 @@ void collision(Mesh* mesh_out, const Mesh* mesh_in) {
 
   static lbm_collision_impl_t impl = get_collision_impl();
 
-  if (impl == COLLISION_UNROLLED) {
+  if (impl == COLLISION_MULTICELL) {
+    collision_multicell(mesh_out, mesh_in);
+  } else if (impl == COLLISION_MULTICELL_VEC) {
+    collision_multicell_vec(mesh_out, mesh_in);
+  } else if (impl == COLLISION_UNROLLED) {
 #pragma omp parallel for schedule(static)
     for (size_t i = 1; i < mesh_in->width - 1; i++) {
       for (size_t j = 1; j < mesh_in->height - 1; j++) {
