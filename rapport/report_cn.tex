@@ -1,7 +1,13 @@
 \documentclass[a4paper,11pt,oneside]{report}
 
-% ── Support du chinois (XeLaTeX) ─────────────────────────────────────────────
-\usepackage[UTF8,zihao=-4]{ctex}
+% ── Langue et polices (XeLaTeX) ──────────────────────────────────────────────
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setmainlanguage{french}
+\setotherlanguage{english}
+\setmainfont{TeX Gyre Pagella}
+\setsansfont{TeX Gyre Heros}
+\setmonofont{Latin Modern Mono}
 
 % ── Mise en page et paragraphes ──────────────────────────────────────────────
 \usepackage{geometry}
@@ -91,7 +97,7 @@
 \newcommand{\reporttype}{Rapport d'optimisation des performances}
 \newcommand{\reporttitletext}{Solveur D2Q9 LBM du sillage de Kármán}
 \newcommand{\reportshorttitle}{Solveur D2Q9 LBM Kármán}
-\newcommand{\reportauthor}{Wei WEI and Jianye SHI}
+\newcommand{\reportauthor}{Wei WEI et Jianye SHI}
 \newcommand{\reportprogram}{Solveur D2Q9 Lattice Boltzmann hybride MPI + OpenMP}
 \newcommand{\reportyear}{Linux x86-64 \quad DDR5-5200 \quad GCC~15 \quad MPICH~4.3.0 \quad OpenMP~4.0}
 \newcommand{\reportdate}{\today}
@@ -138,11 +144,11 @@ Le solveur utilise une stratégie parallèle hybride MPI+OpenMP : MPI décompose
 L'indicateur de performance (Figure of Merit, FOM) est défini par :
 
 \[
-  \text{FOM} = \frac{W \times H \times N_\text{步数}}{T_\text{wall} \times 10^6}
+  \text{FOM} = \frac{W \times H \times N_\text{pas}}{T_\text{wall} \times 10^6}
   \quad [\text{MLUPS, millions de mises à jour de mailles par seconde}]
 \]
 
-Ici, $W = 800$, $H = 160$ et $N_\text{步数} = 20\,000$. Chaque pas de temps comporte trois phases :
+Ici, $W = 800$, $H = 160$ et $N_\text{pas} = 20\,000$. Chaque pas de temps comporte trois phases :
 
 \begin{center}
 \begin{tikzpicture}[
@@ -276,6 +282,7 @@ Dans le code initial, le macro \code{MPI\_HINT\_VTBL} dans \code{cmake/tpl.hpp.i
 total_cells = MESH_WIDTH * MESH_HEIGHT * comm_size;
 // Correction
 total_cells = (uint64_t)MESH_WIDTH * MESH_HEIGHT;
+\end{lstlisting}
 
 Cette erreur surestimait d'un facteur 4 les MLUPS rapportés pour np=4. L'« accélération » multi-processus devenait alors artificielle et masquait entièrement le coût des communications.
 
