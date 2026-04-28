@@ -1,52 +1,58 @@
-# TOP-26: Project
+# TOP-26: Remise du projet
 
-**Optimization of an hybrid parallel D2Q9 lattice Boltzmann solver for Kármán vortex street.**
+**Optimisation d'un solveur D2Q9 Lattice Boltzmann hybride MPI + OpenMP pour le sillage de Karman.**
 
-A complete description and instructions for the project are available [here](https://dssgabriel.github.io/CHP203-TOP/project/).
+Cette archive contient le code source du solveur, l'outil de visualisation et le rapport de synthese. La description academique du sujet initial est disponible [ici](https://dssgabriel.github.io/CHP203-TOP/project/).
 
-## Requirements
+## Note de remise
 
-**Simulation:**
+- Rapport PDF : `rapport/report.pdf`
+- Code source principal : `src/`, `include/`, `CMakeLists.txt`
+- Fichier de configuration d'exemple : `config.txt`
+- Outil de visualisation/validation : `src/lbm_viz/`
 
-- C++ compiler
+## Prerequis
+
+**Simulation**
+
+- Compilateur C++
 - CMake 3.25+
-- MPI implementation (conforming to MPI 3.0+ standard)
-- OpenMP (conforming to OpenMP 4.0+ specification)
+- Implementation MPI compatible MPI 3.0+
+- OpenMP 4.0+
 
-**Validation and visualization:**
+**Validation et visualisation**
 
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv)
 - Gnuplot
-- Compiled `top.display` binary
+- Binaire `top.display` compile
 
-## Build & Run
+## Compiler et executer
 
-**Simulation**
+**Compilation du solveur**
 
-Build:
 ```bash
-# Configure
-cmake -B <BUILD_DIR>
+# Configuration
+cmake -B build
 
-# Compile
-cmake --build <BUILD_DIR> -t top.lbm-exe
+# Compilation du solveur principal
+cmake --build build -t top.lbm-exe
 ```
 
-Run:
+**Execution**
+
 ```bash
-# Execute with 512 MPI processes
-mpirun -np 512 ./<BUILD_DIR>/top.lbm-exe <CONFIG_FILE>
+# Exemple d'execution avec 2 processus MPI
+mpirun -np 2 ./build/top.lbm-exe config.txt
 ```
 
-**Display helper program**
+Le programme lit les parametres depuis le fichier `config.txt` et ecrit un fichier de sortie `.raw` si `output_filename` est defini.
+
+**Compilation du programme d'affichage**
 
 ```bash
-# Configure
-cmake -B <BUILD_DIR>
-
-# Compile
-cmake --build <BUILD_DIR> -t top.display
+# Si necessaire, dans le meme dossier de build
+cmake --build build -t top.display
 ```
 
 ## Configuration file
