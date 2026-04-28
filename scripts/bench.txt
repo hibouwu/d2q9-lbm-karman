@@ -1,0 +1,143 @@
+❯ ./scripts/bench.sh
+[bench] 2026-04-28 12:31:14 — output: /home/jianyeshi/Note/TOP/d2q9-lbm-karman/scripts/bench_runs/20260428-123114
+
+=== Prechecks ===
+[ok] MPI tools
+[ok] Config: /home/jianyeshi/Note/TOP/d2q9-lbm-karman/scripts/../bench_config.txt
+[ok] cpupower found
+[ok] sudo cpupower
+[ok] sudo drop_caches
+All prechecks passed.
+
+=== Lock CPU frequency ===
+[ok] Governor set to performance.
+
+=== Build: build-bench-fom (PROFILING=OFF) ===
+Build done.
+
+=== Build: build-bench-prof (PROFILING=ON) ===
+Build done.
+
+=== Post-build checks ===
+[ok] ldd: libtop.lbm-lib.so → /usr/lib64/mpich/lib
+[ok] AVX-512: 300 zmm in libtop.lbm-lib.so
+[ok] ldd: libtop.lbm-lib.so → /usr/lib64/mpich/lib
+[ok] AVX-512: 306 zmm in libtop.lbm-lib.so
+Post-build checks passed.
+
+===================================================================
+ FOM benchmark (PROFILING=OFF)
+===================================================================
+
+--- np=1 OMP=4 ---
+  [warmup] done
+  [fom   ] 909.20  894.44  895.41  880.30  895.57  885.22  905.10  895.62  891.53  901.30  912.01  908.59  916.88  910.52  915.40  895.02  903.62  883.05  904.70  882.38  
+  median: 898.46 MLUPS
+
+--- np=1 OMP=16 ---
+  [warmup] done
+  [fom   ] 2129.79  2055.37  1925.14  2114.87  2075.43  2023.59  2098.43  2042.99  2020.21  2034.46  1935.78  2021.18  2082.92  2094.83  2026.70  2062.10  2051.64  1959.24  2201.67  2026.74  
+  median: 2047.32 MLUPS
+
+--- np=2 OMP=4 ---
+  [warmup] done
+  [fom   ] 1042.39  1020.22  1063.82  1078.31  1037.36  1054.63  1074.65  1065.44  1073.39  1075.17  1076.83  1065.27  1092.57  1068.55  1078.21  1071.18  1071.96  1089.78  1070.35  1065.03  
+  median: 1070.76 MLUPS
+
+--- np=2 OMP=8 ---
+  [warmup] done
+  [fom   ] 871.34  818.59  888.27  887.20  872.22  825.72  828.14  872.75  787.88  834.79  868.07  909.84  825.58  869.30  881.43  883.78  889.02  841.15  896.36  836.52  
+  median: 870.32 MLUPS
+
+--- np=4 OMP=4 ---
+  [warmup] done
+  [fom   ] 534.34  576.72  567.63  503.37  514.33  572.52  553.21  602.60  506.48  557.05  556.72  591.53  535.42  517.43  522.89  540.02  532.19  511.67  534.48  531.39  
+  median: 534.95 MLUPS
+
+FOM complete. fom.tsv written.
+
+===================================================================
+ Profiling benchmark (PROFILING=ON, np=2 OMP=8)
+===================================================================
+  [warmup] done
+
+--- Profiling run 1/20 ---
+  FOM: 866.06 MLUPS
+
+--- Profiling run 2/20 ---
+  FOM: 815.90 MLUPS
+
+--- Profiling run 3/20 ---
+  FOM: 818.98 MLUPS
+
+--- Profiling run 4/20 ---
+  FOM: 860.44 MLUPS
+
+--- Profiling run 5/20 ---
+  FOM: 853.62 MLUPS
+
+--- Profiling run 6/20 ---
+  FOM: 843.46 MLUPS
+
+--- Profiling run 7/20 ---
+  FOM: 840.26 MLUPS
+
+--- Profiling run 8/20 ---
+  FOM: 858.52 MLUPS
+
+--- Profiling run 9/20 ---
+  FOM: 850.52 MLUPS
+
+--- Profiling run 10/20 ---
+  FOM: 812.11 MLUPS
+
+--- Profiling run 11/20 ---
+  FOM: 817.57 MLUPS
+
+--- Profiling run 12/20 ---
+  FOM: 835.87 MLUPS
+
+--- Profiling run 13/20 ---
+  FOM: 848.96 MLUPS
+
+--- Profiling run 14/20 ---
+  FOM: 792.81 MLUPS
+
+--- Profiling run 15/20 ---
+  FOM: 803.14 MLUPS
+
+--- Profiling run 16/20 ---
+  FOM: 825.72 MLUPS
+
+--- Profiling run 17/20 ---
+  FOM: 817.48 MLUPS
+
+--- Profiling run 18/20 ---
+  FOM: 818.84 MLUPS
+
+--- Profiling run 19/20 ---
+  FOM: 860.75 MLUPS
+
+--- Profiling run 20/20 ---
+  FOM: 816.79 MLUPS
+
+Profiling complete. Selected run 1 (FOM=866.06 MLUPS).
+
+===================================================================
+ Summary
+===================================================================
+
+  np  omp  run1     run2     run3     median
+  1   4    909.20   894.44   895.41   898.46
+  1   16   2129.79  2055.37  1925.14  2047.32
+  2   4    1042.39  1020.22  1063.82  1070.76
+  2   8    871.34   818.59   888.27   870.32
+  4   4    534.34   576.72   567.63   534.95
+
+  Profiling: run 1 selected, FOM=866.06 MLUPS
+
+  Run dir: /home/jianyeshi/Note/TOP/d2q9-lbm-karman/scripts/bench_runs/20260428-123114
+===================================================================
+WARNING: Failed to restore CPU governor.
+         Run manually: sudo cpupower frequency-set -g schedutil
+[bench] FAILED — results in: /home/jianyeshi/Note/TOP/d2q9-lbm-karman/scripts/bench_runs/20260428-123114

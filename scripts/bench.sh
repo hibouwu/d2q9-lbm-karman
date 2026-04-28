@@ -36,7 +36,7 @@ LIB_PROF="$BUILD_PROF/lib/libtop.lbm-lib.so"
 BIN_FOM="$BUILD_FOM/top.lbm-exe"
 BIN_PROF="$BUILD_PROF/top.lbm-exe"
 
-NRUNS=3
+NRUNS=20
 
 # FOM config matrix: "np:omp"
 FOM_CONFIGS=(
