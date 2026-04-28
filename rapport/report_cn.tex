@@ -296,32 +296,47 @@ total_cells = (uint64_t)MESH_WIDTH * MESH_HEIGHT;
 % ──────────────────────────────────────────────────────────────────────────────
 \subsection{P1-B \quad MPI 通信重构（opt04–08）}
 
-\subsubsection{冗余同步删除（opt04–06）}
+\subsubsection{冗余同步的去除（opt04–06）}
 
-原始 \code{lbm\_comm\_halo\_exchange} 内每个通信子阶段后均有一个 \code{MPI\_Barrier}，共 9 个；
-主时间步循环在 \code{special\_cells}、\code{collision}、\code{propagation} 后各有 1 个，共 3 个。
-阻塞式 \code{MPI\_Send}/\code{MPI\_Recv} 已通过 tag + rank 匹配保证消息隔离，barrier 完全冗余。
-此外，\code{halo\_exchange} 中存在两处重复通信阶段（bottom-left 对角、right-to-left 水平各出现两次）。
-删除全部 12 个 barrier 及两处重复阶段后，np=4 提升 14\%。
+在原始实现中，\code{lbm\_comm\_halo\_exchange} 的每一个通信阶段之后都调用了
+\code{MPI\_Barrier}，共计 9 次。此外，在主时间步循环中，
+\code{special\_cells}、\code{collision} 和 \code{propagation} 之后
+也各插入了一次 barrier，总计达到 12 次同步。
+
+然而，这些同步实际上并非必要。由于通信采用阻塞式
+\code{MPI\_Send}/\code{MPI\_Recv}，并且通过 tag 与 rank 的匹配机制已经能够保证
+消息的正确配对与顺序，因此额外的全局同步不会带来额外的安全性，反而会引入不必要的等待开销。
+
+在分析过程中还发现，\code{halo\_exchange} 中存在重复的通信阶段，
+例如 bottom-left 对角方向以及 right-to-left 水平方向各被执行了两次，
+进一步加重了通信负担。
+
+因此，我们删除了所有冗余的 barrier，并移除了重复的通信阶段。
+在 np=4 的配置下，该优化带来了约 14\% 的性能提升。
 
 \subsubsection{批量消息打包（opt07–08）}
 
-\textbf{根本问题：}垂直 halo 通信按格点逐方向发送，每次 halo 调用产生约
-$(W-2)\times9\approx7\,182$ 条 MPI 消息，MPI 启动开销主导延迟。
+性能分析表明，通信开销的主要来源并非数据量本身，而是消息数量过多。
+在原始实现中，垂直方向的 halo 交换是以“逐格点、逐方向”的方式进行的，
+导致每次调用需要发送大约 $(W-2)\times 9 \approx 7\,182$ 条小消息，
+MPI 启动开销（latence de démarrage）成为主要瓶颈。
 
-\textbf{解决方案：}将整行 halo 数据打包到连续缓冲区后单次发送：
+为减少消息数量，我们将整行 halo 数据打包为一个连续的缓冲区，
+并通过一次发送完成数据传输。这样将原本数千条小消息合并为单条大消息，
+显著降低了通信启动成本。
 
 \begin{lstlisting}[language={}]
-// 修改前：每格点每方向单独发送，约 7182 条消息/次
+// 修改前：逐格点发送
 foreach x in [1, W-2]:
     foreach k in [0, 8]:
         MPI_Send(cell[x][halo_y][k], count=1)
 
-// 修改后：pack 整行为连续缓冲区，1 条消息/次
-pack(buffer, halo_row[1..W-2])   // (W-2)*9 个 double
+// 修改后：整行打包发送
+pack(buffer, halo_row[1..W-2])   // (W-2)*9 doubles
 MPI_Send(buffer, count=(W-2)*9)
 MPI_Recv(buffer, count=(W-2)*9)
 unpack(ghost_row[1..W-2], buffer)
+\end{lstlisting}
 \end{lstlisting}
 
 \begin{table}[H]
