@@ -252,7 +252,7 @@
   node[midway,right=0.2cm,fom] {np=2 OMP=4: 279 MLUPS};
 \draw[arr=phase2] (F.south) -- (G.north)
   node[midway,right=0.2cm,fom] {np=2 OMP=4: 832 MLUPS};
-\node[fom,below=0.3cm of G]{\textbf{最终：905 MLUPS}（np=2, OMP=4）};
+\node[fom,below=0.3cm of G]{\textbf{最终（opt26）：802 MLUPS}（np=2, OMP=8，统一协议）};
 
 \end{tikzpicture}
 \caption{完整优化路线图，opt\,01–24。}
@@ -764,7 +764,7 @@ np=1, OMP=4 & 293.52 & 757.20 & \textbf{+158\%} \\
 np=2, OMP=4 & 422.99 & 832.34 & \textbf{+97\%} \\
 \bottomrule
 \end{tabular}
-\caption{AVX-512 向量化效果（opt22）。FP64 吞吐量达理论峰值的约 65\%。}
+\caption{AVX-512 向量化效果（opt22）。通过 \texttt{objdump} 确认内层循环生成 \texttt{zmm} 系列指令，向量化有效。}
 \end{table}
 
 % ──────────────────────────────────────────────────────────────────────────────
@@ -947,6 +947,7 @@ np=4, OMP=4 & 368.60 & 357.15 & 508.14 & —      & \textbf{705.52} & — \\
 \bottomrule
 \multicolumn{7}{l}{\footnotesize 单位：MLUPS。平台：AMD Ryzen~9~8940HX，Linux x86-64，
   GCC~15，MPICH~4.3.0。}\\
+\multicolumn{7}{l}{\footnotesize opt19–opt24 数据采集于开发期（无 CPU 频率锁定），仅用于阶段间相对提升参考，不与 opt26 统一协议数据直接比较。}\\
 \multicolumn{7}{l}{\footnotesize $^\dagger$opt26 为 intra-node 结果；多节点基准测试待进行。}
 \end{tabular}
 \caption{第二部分各优化步骤 FOM 对比。}
@@ -956,12 +957,13 @@ np=4, OMP=4 & 368.60 & 357.15 & 508.14 & —      & \textbf{705.52} & — \\
 \chapter*{全程性能演进}
 \addcontentsline{toc}{chapter}{全程性能演进}
 
+% ── 表 A：P1 阶段（macOS AArch64）────────────────────────────────────────────
 \begin{table}[H]
 \centering
 \setlength{\extrarowheight}{2pt}
 \begin{tabular}{@{}p{4.8cm}p{2.2cm}rrr@{}}
 \toprule
-\textbf{里程碑} & \textbf{配置} & \textbf{FOM} & \textbf{较上阶段} & \textbf{较基线} \\
+\textbf{里程碑} & \textbf{配置} & \textbf{FOM (MLUPS)} & \textbf{较上阶段} & \textbf{较基线} \\
 \midrule
 原始代码（含隐藏 sleep） & np=1 OMP=1 & $\approx$0 & — & — \\
 \rowcolor{rowgray}
@@ -970,17 +972,38 @@ P1-B 完成（opt08）  & np=2 OMP=1 & 103 & \textbf{+72\%} & +72\% \\
 \rowcolor{rowgray}
 P1-C 完成（opt13）  & np=1 OMP=4 & 194 & \textbf{+88\%} & \textbf{+220\%} \\
 P1-D 完成（opt17）  & np=2 OMP=1 & 122 & 集群优化 & — \\
-\rowcolor{rowgray}
-P2-A：SoA（opt19）  & np=2 OMP=4 & 279 & 新基线 & — \\
-P2-B：\textit{k}-outer（opt20） & np=2 OMP=4 & 319 & +15\% & — \\
-\rowcolor{rowgray}
-P2-B：multicell（opt21） & np=2 OMP=4 & 423 & \textbf{+33\%} & — \\
-P2-B：AVX-512（opt22）   & np=2 OMP=4 & 832 & \textbf{+97\%} & — \\
-\rowcolor{rowgray}
-P2-C：\textit{k}-major（opt24） & np=2 OMP=4 & \textbf{905} & +9\% & \textbf{$\times$15} \\
 \bottomrule
 \end{tabular}
-\caption{全程优化历史。最终 FOM 为第一部分基线的 15 倍。}
+\caption{第一部分优化历史（测试平台：macOS AArch64，Apple Silicon）。}
+\end{table}
+
+\medskip
+\noindent\textit{平台切换：第二部分在 AMD Ryzen~9~8940HX（Linux x86-64）上进行，绝对 FOM 数字不跨平台比较。}
+\medskip
+
+% ── 表 B：P2 阶段（AMD Ryzen 9 8940HX，Linux x86-64）──────────────────────
+\begin{table}[H]
+\centering
+\setlength{\extrarowheight}{2pt}
+\begin{tabular}{@{}p{4.8cm}p{2.2cm}rrr@{}}
+\toprule
+\textbf{里程碑} & \textbf{配置} & \textbf{FOM (MLUPS)} & \textbf{较上阶段} & \textbf{较基线} \\
+\midrule
+P2-A：SoA（opt19）  & np=2 OMP=4 & 279 & P2 基线确立 & — \\
+\rowcolor{rowgray}
+P2-B：\textit{k}-outer（opt20） & np=2 OMP=4 & 319 & +15\% & +15\% \\
+P2-B：multicell（opt21） & np=2 OMP=4 & 423 & \textbf{+33\%} & +52\% \\
+\rowcolor{rowgray}
+P2-B：AVX-512（opt22）   & np=2 OMP=4 & 832 & \textbf{+97\%} & \textbf{+198\%} \\
+P2-C：\textit{k}-major（opt24） & np=2 OMP=4 & \textbf{905} & +9\% & \textbf{+224\%} \\
+\rowcolor{rowgray}
+P2-D：overlap（opt26） & np=2 OMP=8 & \textbf{802}$^\dagger$ & $+0.3\%^*$ & — \\
+\bottomrule
+\multicolumn{5}{l}{\footnotesize opt19–opt24 数据采集于开发期（无 CPU 频率锁定），仅用于阶段间相对提升参考。}\\
+\multicolumn{5}{l}{\footnotesize $^\dagger$opt26 采用统一协议（CPU 频率锁定，np=2 OMP=8）。}\\
+\multicolumn{5}{l}{\footnotesize $^*$opt25→opt26 对比在相同配置（np=2 OMP=8）下进行，数字可信。}\\
+\end{tabular}
+\caption{第二部分优化历史（测试平台：AMD Ryzen~9~8940HX，Linux x86-64，GCC~15，MPICH~4.3.0）。P2 内部 opt19 $\to$ opt24：$279 \to 905$ MLUPS，约 $\times 3.2$。}
 \end{table}
 
 \begin{figure}[H]

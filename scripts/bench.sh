@@ -44,9 +44,9 @@ FOM_CONFIGS=(
   "1:16"
   "2:4"
   "2:8"
-  "2:16"
+  # "2:16"  # np×OMP=32 = 逻辑核数，SMT 开启时超订阅，性能断崖（实测 37 MLUPS）；禁用 SMT 后可启用
   "4:4"
-  "4:8"
+  # "4:8"   # np×OMP=32，同上
 )
 
 PROF_NP=2
@@ -308,7 +308,6 @@ for (( i=1; i<=NRUNS; i++ )); do
   echo "$local_out" | grep -qE "collision|halo_start|propagation" \
     || die "Profiling run $i: no phase table in output"
 
-  local pf
   pf=$(echo "$local_out" | extract_fom)
   [[ -n "$pf" ]] || die "Profiling run $i: no MLUPS in output"
 

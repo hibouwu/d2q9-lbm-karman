@@ -1,0 +1,9 @@
+timestamp:   20260428-112702
+machine:     AMD Ryzen 9 8940HX with Radeon Graphics
+kernel:      6.19.13-200.fc43.x86_64
+cores:       32 logical / 32 physical
+compiler:    g++ (GCC) 15.2.1 20260123 (Red Hat 15.2.1-7)
+mpiexec:     HYDRA build details:
+git_rev:     71b246bf09ad7eb7e14b9aa2e6fa06c1ea6622ab
+build_fom:   /home/jianyeshi/Note/TOP/d2q9-lbm-karman/scripts/../build-bench-fom
+build_prof:  /home/jianyeshi/Note/TOP/d2q9-lbm-karman/scripts/../build-bench-prof
