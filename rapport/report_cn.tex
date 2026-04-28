@@ -567,6 +567,80 @@ P1-D（opt17）   & 65.7 & 146$^\dagger$ & 121.9         & 118 \\
 \chapter*{第二部分——优化 18–26}
 \addcontentsline{toc}{chapter}{第二部分——优化 18–26}
 
+第二部分承接同学在前一阶段完成的代码基线，工作平台转到 AMD x86-64 设备后继续推进。这里的重点不是重复已有结果，而是在新的处理器与运行环境上补齐 profiling、数据布局和计算核心重构，建立可比的性能基线，并为后续面向不同 CPU 平台的适配保留统一口径。
+
+\section{实验环境}
+
+\subsection{硬件平台}
+
+\begin{table}[H]
+\centering
+\caption{LBM 实验硬件配置}
+\label{tab:lbm_hardware}
+\begin{tabular}{p{0.28\textwidth}p{0.62\textwidth}}
+\toprule
+\textbf{组件} & \textbf{规格} \\
+\midrule
+处理器 & AMD Ryzen 9 8940HX，x86\_64，Zen~4 微架构 \\
+物理核心/逻辑线程 & 16 物理核心，32 逻辑线程（SMT，每核 2 线程）\\
+CCX 分组 & 2 个 CCX，各含 8 核 + 32\,MiB L3 \\
+缓存层次 & L1d 32\,KiB/核，L2 1\,MiB/核，L3 64\,MiB（2 实例共享）\\
+运行频率 & \texttt{cpupower frequency-set -g performance}（禁用 Turbo Boost）\\
+内存 & 30\,GiB DDR5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{软件环境}
+
+\begin{table}[H]
+\centering
+\caption{LBM 实验软件配置}
+\label{tab:lbm_software}
+\begin{tabular}{p{0.28\textwidth}p{0.62\textwidth}}
+\toprule
+\textbf{组件} & \textbf{版本/详情} \\
+\midrule
+操作系统 & Fedora Linux 42 \\
+编译器 & GCC 15.2.1，编译选项 \texttt{-O3 -march=native -DNDEBUG} \\
+MPI 实现 & MPICH 4.2.2（Hydra 启动器，intra-node shared memory）\\
+并行模型 & MPI 3.0 + OpenMP 4.0 \\
+向量指令集 & AVX-512（\texttt{-march=native} 触发，通过 \texttt{objdump} 确认 zmm 指令）\\
+Profiling & \texttt{LBM\_ENABLE\_PROFILING=ON}，6 阶段 \texttt{MPI\_Wtime} 计时 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{测量协议}\label{subsec:lbm_protocol}
+
+为确保测量结果的可靠性，我们采用如下协议：
+
+\begin{itemize}
+  \item \textbf{预热（Warm-up）}：每组配置正式计时前完整执行一次求解器
+        （20\,000 时间步），结果丢弃。目的是将指令缓存、数据缓存及 OMP
+        线程团队初始化带入稳态。
+
+  \item \textbf{计时}：程序内部使用 \texttt{MPI\_Wtime} 精确计时，覆盖全部
+        20\,000 步；FOM 由 $W \times H \times N_\text{步} \,/\, (T_\text{wall}
+        \times 10^6)$ 计算，单位 MLUPS。每组配置重复 3 次，取中位数上报。
+
+  \item \textbf{硬件计数器}：通过 \texttt{perf stat -r 3} 外部重复 3 次，
+        采集指令数（Instructions）、周期数（Cycles）、上下文切换
+        （Context Switches）、CPU 迁移（CPU Migrations）及缓存缺失
+        （Cache Misses）。
+
+  \item \textbf{环境隔离}：每次运行前通过
+        \texttt{echo 3 > /proc/sys/vm/drop\_caches} 清空页缓存；
+        通过 \texttt{cpupower frequency-set -g performance} 锁定
+        CPU 至最高固定频率（禁用 Turbo Boost）。
+        预热是稳定执行路径的主要机制；清缓存用于降低跨批次的系统状态差异。
+
+  \item \textbf{线程亲和性}：不显式设置 \texttt{OMP\_PROC\_BIND}。
+        在无配套 MPI 进程绑定（\texttt{--map-by core:PE=N}）的条件下，
+        \texttt{OMP\_PROC\_BIND=close} 会导致不同 rank 的线程竞争相同物理核，
+        实测 FOM 下降约 15\%；保持 OS 默认调度反而更好。
+\end{itemize}
+
 % ──────────────────────────────────────────────────────────────────────────────
 \subsection{P2-A \quad 可观测性基础设施与存储布局重构（opt18–19）}
 
