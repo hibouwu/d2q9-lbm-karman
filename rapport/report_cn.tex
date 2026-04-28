@@ -252,7 +252,7 @@
   node[midway,right=0.2cm,fom] {np=2 OMP=4: 279 MLUPS};
 \draw[arr=phase2] (F.south) -- (G.north)
   node[midway,right=0.2cm,fom] {np=2 OMP=4: 832 MLUPS};
-\node[fom,below=0.3cm of G]{\textbf{最终（opt26）：802 MLUPS}（np=2, OMP=8，统一协议）};
+\node[fom,below=0.3cm of G]{\textbf{最终（opt26）：782 MLUPS}（np=2, OMP=8，统一协议）};
 
 \end{tikzpicture}
 \caption{完整优化路线图，opt\,01–24。}
@@ -942,13 +942,14 @@ FOM 增幅在测量噪声范围（$\pm 1\%$）以内。}
 \midrule
 np=1, OMP=4 & 157.79 & 212.93 & 293.52 & 757.20 & — & — \\
 np=2, OMP=4 & 278.66 & 319.07 & 422.99 & 832.34 & \textbf{905.13} & — \\
-np=2, OMP=8 & — & — & — & — & 800.27 & 802.31 \\
+np=2, OMP=8 & — & — & — & — & 800.27 & \textbf{782.35}$^\S$ \\
 np=4, OMP=4 & 368.60 & 357.15 & 508.14 & —      & \textbf{705.52} & — \\
 \bottomrule
 \multicolumn{7}{l}{\footnotesize 单位：MLUPS。平台：AMD Ryzen~9~8940HX，Linux x86-64，
   GCC~15，MPICH~4.3.0。}\\
 \multicolumn{7}{l}{\footnotesize opt19–opt24 数据采集于开发期（无 CPU 频率锁定），仅用于阶段间相对提升参考，不与 opt26 统一协议数据直接比较。}\\
-\multicolumn{7}{l}{\footnotesize $^\dagger$opt26 为 intra-node 结果；多节点基准测试待进行。}
+\multicolumn{7}{l}{\footnotesize $^\dagger$opt26 为 intra-node 结果；多节点基准测试待进行。}\\
+\multicolumn{7}{l}{\footnotesize $^\S$opt26 统一协议实测值（2026-04-28，CPU 频率锁定，PROFILING=OFF，3 次 median）。}
 \end{tabular}
 \caption{第二部分各优化步骤 FOM 对比。}
 \end{table}
@@ -997,7 +998,7 @@ P2-B：multicell（opt21） & np=2 OMP=4 & 423 & \textbf{+33\%} & +52\% \\
 P2-B：AVX-512（opt22）   & np=2 OMP=4 & 832 & \textbf{+97\%} & \textbf{+198\%} \\
 P2-C：\textit{k}-major（opt24） & np=2 OMP=4 & \textbf{905} & +9\% & \textbf{+224\%} \\
 \rowcolor{rowgray}
-P2-D：overlap（opt26） & np=2 OMP=8 & \textbf{802}$^\dagger$ & $+0.3\%^*$ & — \\
+P2-D：overlap（opt26） & np=2 OMP=8 & \textbf{782}$^\dagger$ & $+0.3\%^*$ & — \\
 \bottomrule
 \multicolumn{5}{l}{\footnotesize opt19–opt24 数据采集于开发期（无 CPU 频率锁定），仅用于阶段间相对提升参考。}\\
 \multicolumn{5}{l}{\footnotesize $^\dagger$opt26 采用统一协议（CPU 频率锁定，np=2 OMP=8）。}\\
